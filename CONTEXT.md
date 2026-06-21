@@ -32,6 +32,10 @@ _Avoid_: Session Brief, separate summary file, transcript file
 A concise, topic-driven account of what mattered in a Session. It uses concrete headings derived from the content and includes owner-specific Next Steps only when genuine follow-up exists.
 _Avoid_: Overview, fixed decisions section, forced action items
 
+**Extra Instructions**:
+Optional Session-specific guidance supplied during intake to supplement the default extraction and Action Summary rules.
+_Avoid_: Per-session template editor, Attached Context
+
 **Chapter**:
 A titled major segment of a Session formatted as a YouTube-compatible timestamp line, such as `00:00 Opening and context`. Chapters begin at `00:00`, appear in ascending order, contain at least three entries when emitted, and each spans at least 10 seconds.
 _Avoid_: Topic, snapshot moment
@@ -101,8 +105,8 @@ A naming marker for a Session containing several concrete explanations, procedur
 _Avoid_: [k], important, long
 
 **Attached Context**:
-User-supplied material that helps interpret or direct analysis of a Session, including names, terminology, background, Session-specific guidance, and supporting files. Supporting files are analysis inputs only and remain at their original locations.
-_Avoid_: Prompt, Extra Instructions, miscellaneous attachments
+User-supplied material that helps interpret a Session, including names, terminology, background, and supporting files. Supporting files are analysis inputs only and remain at their original locations.
+_Avoid_: Prompt, miscellaneous attachments
 
 **Context Section**:
 The optional Session Record section containing user-supplied context text and the names of attachments consulted during analysis. It is omitted when no Attached Context was provided and never embeds attachment contents.
@@ -125,48 +129,28 @@ The content-derived identity stored for Source Media so valid cached Analysis Au
 _Avoid_: Path-only identity, filename matching
 
 **Analysis Audio**:
-The mono Opus audio in an Ogg container derived once from Source Media at a 24 kbps bitrate, reused for both Whisper and Gemini, and retained in the Completed Session Folder as a durable archive asset. It shares the approved Session basename with the suffix `.24k.ogg`; Source video is not provided.
+The mono Opus audio in an Ogg container derived once from Source Media at a 24 kbps bitrate, reused for both Whisper and Gemini, and retained in the Completed Session Folder as a durable archive asset. It shares the approved Session basename with the suffix `.24k.ogg`. Gemini also receives the complete Whisper Transcript, Session Date, Attached Context, Extraction Options, and output rules; Source video is not provided.
 _Avoid_: Temporary analysis file, Source video input, audio-only transcript without Whisper baseline
 
 **Analysis Result**:
 The single structured response returned by Gemini containing the streamed Session Record Markdown and machine-readable metadata required for naming, Speaker Labels, Snapshot extraction, and verification.
 _Avoid_: Separate metadata request, parsing metadata from prose
 
-**Analysis Lineage**:
-The related sequence consisting of one Analysis Result and any Revisions derived from review feedback. A Redo starts a new lineage because its analysis inputs changed.
-_Avoid_: Version history across Redos, processing attempt
-
-**Analysis Note**:
-A brief Gemini-authored account accompanying every Analysis Result or Revision that explains how analysis went and calls attention to uncertainty or noteworthy choices.
-_Avoid_: Chat response, hidden reasoning, optional status message
-
 **Raw Analysis Stream**:
 The incomplete structured Gemini response shown live during analysis and retained in private application storage for recovery and debugging. Inactive history is removed after 30 days, while active, Interrupted, and Needs Attention Sessions are exempt.
 _Avoid_: Archived deliverable, final Session Record
 
-**Redo**:
-A fresh Analysis Result produced after analysis inputs change. It starts a new Analysis Lineage while reusing valid prerequisites such as Analysis Audio and transcription.
-_Avoid_: Revision, full pipeline restart, regeneration
-
-**Review Feedback**:
-Evidence supplied during Final Review through direct Session Record edits or written correction guidance. Edits are interpreted for intent rather than treated as immutable text or a separate annotation system.
-_Avoid_: Annotation, fixed constraint, intake change
-
-**Revision**:
-A new version within the current Analysis Lineage produced from Review Feedback. Revisions remain comparable and switchable during Final Review.
-_Avoid_: Redo, intake regeneration
-
-**Machine Validation**:
-The automatic verification that an Analysis Result or Revision satisfies required structure, naming, references, and final Transcript placement before finalization.
-_Avoid_: Manual validation step, review approval
+**Regeneration**:
+A new Analysis Result produced for a pending Session after changing Session inputs. It reuses valid Analysis Audio and Whisper transcription, rerunning only missing or invalid prerequisite stages; reselecting the same Source Media may reconnect to those cached artifacts. Finalized Sessions reopen read-only and cannot regenerate in place. Prior Analysis Results remain in private application storage and can be reached through an advanced Open Data Folder action.
+_Avoid_: Unconditional full-pipeline rerun
 
 **Session Intake**:
-The input portion of the Session workspace where the user chooses Source Media and a Destination, supplies Attached Context, and adjusts Extraction Options before requesting an Analysis Result. Its values remain readable throughout processing and Final Review; changing them after analysis creates a Redo.
+The Session workspace where the user chooses a Destination, supplies Attached Context, adjusts Extraction Options, starts processing, reviews the formatted Analysis Result, and may change inputs and regenerate without navigating to another page. A marked OBS recording opens this workspace automatically.
 _Avoid_: Automatic processing, OBS-only workflow
 
 **Final Review**:
-The document-first review of the current Analysis Result or Revision before filesystem finalization. The user may edit the Session Record directly, provide correction guidance, create further Revisions, or change analysis inputs to begin a Redo without navigating to another page.
-_Avoid_: Separate review page, mandatory section-by-section approval, chat interface
+The readable Analysis Result displayed in the same Session workspace after streaming completes and before filesystem finalization. The user may edit its Markdown directly or change visible inputs and regenerate without navigating backward.
+_Avoid_: Separate review page, mandatory section-by-section approval, automatic finalization
 
 **Session Marker**:
 A visible, single-use toggle owned by Speech Distiller indicating that the next or currently active OBS recording should open Session Intake after recording stops. OBS and Raycast control it through the local application API, and it automatically disarms after claiming one completed recording.
