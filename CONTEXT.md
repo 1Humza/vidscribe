@@ -156,10 +156,6 @@ _Avoid_: Annotation, fixed constraint, intake change
 A new version within the current Analysis Lineage produced from Review Feedback. Revisions remain comparable and switchable during Final Review.
 _Avoid_: Redo, intake regeneration
 
-**Current Revision**:
-The Revision presently selected as the Session's authoritative output during Final Review. Selecting another Revision makes it current immediately without copying, restoring, or deleting any version.
-_Avoid_: Latest Revision, restored version, draft copy
-
 **Machine Validation**:
 The automatic verification that an Analysis Result or Revision satisfies required structure, naming, references, and final Transcript placement before finalization.
 _Avoid_: Manual validation step, review approval
