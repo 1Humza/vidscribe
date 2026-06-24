@@ -32,9 +32,9 @@ _Avoid_: Session Brief, separate summary file, transcript file
 A concise, topic-driven account of what mattered in a Session. It uses concrete headings derived from the content and includes owner-specific Next Steps only when genuine follow-up exists.
 _Avoid_: Overview, fixed decisions section, forced action items
 
-**Extra Instructions**:
-Optional Session-specific guidance supplied during intake to supplement the default extraction and Action Summary rules.
-_Avoid_: Per-session template editor, Attached Context
+**Context & Instructions**:
+The single intake field where the user supplies Session-specific context and guidance for interpreting the recording and shaping the output. It replaces separate context and extra-instruction fields so the user has one obvious place to explain what matters.
+_Avoid_: Separate extra-instructions box, per-session template editor, Attached Context
 
 **Chapter**:
 A titled major segment of a Session formatted as a YouTube-compatible timestamp line, such as `00:00 Opening and context`. Chapters begin at `00:00`, appear in ascending order, contain at least three entries when emitted, and each spans at least 10 seconds.
@@ -60,9 +60,13 @@ _Avoid_: Automatic interval capture, talking-head capture
 The stable Session Record section listing Snapshot timestamps and filenames. It remains present with an explicit empty result when no Snapshot qualifies.
 _Avoid_: Forced minimum snapshots, omitted section
 
-**Session Date**:
+**Recording Date**:
 The date on which a Session was recorded. A valid date in the recording filename takes precedence, followed by reliable recording metadata; the user supplies or confirms it when neither is available.
 _Avoid_: Processing date, upload date
+
+**Local Start Time**:
+The local clock time when a Session recording began, when it can be inferred from the recording filename or reliable metadata. It supports identity, ordering, and disambiguation but is not the same as the Recording Date.
+_Avoid_: Processing time, upload time
 
 **Session Purpose**:
 The controlled term in a Session's Short Name that communicates the primary nature of the interaction, such as Sync, Working, Onboarding, Tutorial, Interview, or Dialogue.
@@ -116,6 +120,10 @@ _Avoid_: Empty context section, copied attachment content
 A reusable, user-labeled directory reference where a completed Session is stored. One Destination is the default and is preselected during intake, while the user may choose another configured Destination.
 _Avoid_: Destination Profile, Gemini-selected destination, category
 
+**Template**:
+A reusable extraction preset that defines the default Session Record shape, such as meeting-style summaries, chapters, transcript, snapshots, and structured naming. A Custom Template starts from the currently selected Template and appears when inherited options are changed for the current Session.
+_Avoid_: Destination, Profile, blank custom mode
+
 **Extraction Options**:
 The user-selected set of information to include in a Session Record. Common meeting outputs are selected by default and can be changed for each Session.
 _Avoid_: Mode, profile, fixed template
@@ -129,27 +137,39 @@ The content-derived identity stored for Source Media so valid cached Analysis Au
 _Avoid_: Path-only identity, filename matching
 
 **Analysis Audio**:
-The mono Opus audio in an Ogg container derived once from Source Media at a 24 kbps bitrate, reused for both Whisper and Gemini, and retained in the Completed Session Folder as a durable archive asset. It shares the approved Session basename with the suffix `.24k.ogg`. Gemini also receives the complete Whisper Transcript, Session Date, Attached Context, Extraction Options, and output rules; Source video is not provided.
+The mono Opus audio in an Ogg container derived once from Source Media at a 24 kbps bitrate, reused for both Whisper and Gemini, and retained in the Completed Session Folder as a durable archive asset. It shares the approved Session basename with the suffix `.24k.ogg`. Gemini also receives the complete Whisper Transcript, Recording Date, Attached Context, Extraction Options, and output rules; Source video is not provided.
 _Avoid_: Temporary analysis file, Source video input, audio-only transcript without Whisper baseline
 
 **Analysis Result**:
 The single structured response returned by Gemini containing the streamed Session Record Markdown and machine-readable metadata required for naming, Speaker Labels, Snapshot extraction, and verification.
 _Avoid_: Separate metadata request, parsing metadata from prose
 
+**Analysis Note**:
+A short Gemini-facing status or observation displayed immediately before the generated Session Record during Final Review. It helps the user understand generation quality or caveats, but it is not included in the finalized Session Record.
+_Avoid_: Final document section, hidden reasoning, chain-of-thought
+
 **Raw Analysis Stream**:
 The incomplete structured Gemini response shown live during analysis and retained in private application storage for recovery and debugging. Inactive history is removed after 30 days, while active, Interrupted, and Needs Attention Sessions are exempt.
 _Avoid_: Archived deliverable, final Session Record
 
-**Regeneration**:
-A new Analysis Result produced for a pending Session after changing Session inputs. It reuses valid Analysis Audio and Whisper transcription, rerunning only missing or invalid prerequisite stages; reselecting the same Source Media may reconnect to those cached artifacts. Finalized Sessions reopen read-only and cannot regenerate in place. Prior Analysis Results remain in private application storage and can be reached through an advanced Open Data Folder action.
-_Avoid_: Unconditional full-pipeline rerun
+**Redo**:
+A destructive new Analysis Result produced for a pending Session after changing core intake inputs such as Source Media, Context & Instructions, Template, Extraction Options, or model. It reuses valid prerequisite artifacts when possible, but replaces the prior analysis lineage instead of creating a review revision.
+_Avoid_: Revision, undoable branch, automatic rerun on every edit
+
+**Revision**:
+A numbered AI-backed iteration created from Final Review corrections, document edits, detected-language corrections that require interpretation, or natural-language revision instructions. Revisions are chronological and linear; the selected Revision is treated as the current output.
+_Avoid_: Redo, branch tree, local typo fix
+
+**Detected Language**:
+The editable review surface for recognized speakers, people and handles, project terms, and uncertain language. Clear deterministic corrections apply locally, while context-dependent corrections can be routed into a Revision.
+_Avoid_: Annotation system, separate glossary editor
 
 **Session Intake**:
-The Session workspace where the user chooses a Destination, supplies Attached Context, adjusts Extraction Options, starts processing, reviews the formatted Analysis Result, and may change inputs and regenerate without navigating to another page. A marked OBS recording opens this workspace automatically.
+The Session workspace where the user chooses a Destination, supplies Context & Instructions, selects a Template, adjusts Extraction Options, starts processing, reviews the formatted Analysis Result, and may change inputs without navigating to another page. A marked OBS recording opens this workspace automatically.
 _Avoid_: Automatic processing, OBS-only workflow
 
 **Final Review**:
-The readable Analysis Result displayed in the same Session workspace after streaming completes and before filesystem finalization. The user may edit its Markdown directly or change visible inputs and regenerate without navigating backward.
+The document-first review state displayed in the same Session workspace after streaming completes and before filesystem finalization. The user may edit its Markdown directly, correct Detected Language, review Snapshots, request a Revision, or change intake inputs and Redo without navigating backward.
 _Avoid_: Separate review page, mandatory section-by-section approval, automatic finalization
 
 **Session Marker**:
@@ -173,5 +193,5 @@ A Session the user intentionally stops. Temporary processing data is removed onl
 _Avoid_: Rejected, interrupted
 
 **Completed Session Folder**:
-The systematically named directory created inside the selected Destination. Its root contains the verified Session Record, Source Media, and any Snapshot files for exactly one Session. The folder, Session Record, and Source Media share the same approved Session Date and Short Name basename.
+The systematically named directory created inside the selected Destination. Its root contains the verified Session Record, Source Media, and any Snapshot files for exactly one Session. The folder, Session Record, and Source Media share the same approved Recording Date and Short Name basename.
 _Avoid_: Job folder, arbitrary meeting folder
