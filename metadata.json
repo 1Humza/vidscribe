@@ -1,0 +1,8 @@
+{
+  "name": "Speech Distiller",
+  "description": "Process and distill long-form audio and video into structured, actionable intelligence and visual insights using Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
