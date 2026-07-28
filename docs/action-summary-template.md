@@ -1,10 +1,12 @@
 # Action Summary Template
 
-The Action Summary is adaptive rather than built from fixed generic categories.
+The Action Summary is adaptive rather than built from fixed generic categories. It repeats the Session Record Header so the complete block can be copied and sent by itself.
 
 ```md
 📝 **{Specific Meeting Title}** · {MM-DD-YYYY}
 @{ParticipantHandle} @{ParticipantHandle}
+
+{Recall Brief}
 
 {Relevant Emoji} **{Concrete Topic Heading}**
 {Compact findings, constraints, conclusions, and relevant details}
@@ -22,6 +24,8 @@ The Action Summary is adaptive rather than built from fixed generic categories.
 - Put participant handles on the next line, separated by spaces.
 - Use canonical participant handles from Attached Context when provided.
 - If no handle is known, use `@FirstName` rather than inventing a username.
+- Put the Recall Brief immediately after the participant line.
+- Repeat the title and participant line inside Action Summary even though they already appear in the Session Record opening.
 - Make the title specific enough to distinguish the Session from another meeting about the same project.
 - Derive approximately two to six concrete topic headings from the Session.
 - Prefer domain-specific headings such as `Structure / Build Order` or `Tooling / Setup`.
