@@ -2,6 +2,10 @@
 
 Checked against official provider documentation on July 22, 2026. Provider limits can change and should be represented as configuration rather than scattered constants.
 
+## Provider boundary
+
+Keep Vidscribe's pipeline and structured contracts model-agnostic where practical. Provider adapters translate between provider-specific upload, streaming, effort, response, and error behavior and Vidscribe's canonical Analysis Audio, Transcript, Analysis Result, and Session states; v1 supports only the selected Groq and Gemini models and does not require a generic plugin system, lowest-common-denominator schema, or untested alternate-provider implementation.
+
 ## Groq transcription
 
 Default model: `whisper-large-v3-turbo`.
