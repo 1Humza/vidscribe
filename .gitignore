@@ -6,5 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+api_keys.env
 __pycache__/
 *.py[cod]
+.venv/
+.pytest_cache/
+*.sqlite3
+playwright-report/
+test-results/

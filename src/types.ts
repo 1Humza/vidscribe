@@ -1,41 +1,102 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+export interface ExtractionOptionsDto {
+  action_summary: boolean;
+  topics: boolean;
+  chapters: boolean;
+  highlights: boolean;
+}
 
-export interface SourceFile {
+export interface AnalysisResultDto {
+  session_record_markdown: string;
+  short_name: string;
+  session_date: string;
+  speaker_labels: string[];
+}
+
+export type AnalysisAttemptStatus = 'streaming' | 'completed' | 'error';
+
+export interface AnalysisAttemptDto {
+  id: string;
+  status: AnalysisAttemptStatus;
+  model: string;
+  effort: string;
+  raw_stream: string;
+  result: AnalysisResultDto | null;
+  error: string | null;
+}
+
+export type SessionStatus = 'ready' | 'processing' | 'review' | 'error';
+export type SessionStage = 'intake' | 'preparing' | 'transcribing' | 'analyzing' | 'review';
+
+export interface SessionViewDto {
+  id: string;
+  status: SessionStatus;
+  stage: SessionStage;
+  progress: number;
+  source_path: string;
+  destination_path: string;
+  extra_instructions: string;
+  extraction_options: ExtractionOptionsDto;
+  analysis_audio_path: string | null;
+  transcript: string | null;
+  attempts: AnalysisAttemptDto[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourcePickerSelectionDto {
+  selection_id: string;
+  path: string;
   name: string;
-  sizeStr: string;
-  durationStr: string;
-  dateStr: string;
-  type: 'audio' | 'video' | 'url';
-  url?: string;
+  media_kind: 'audio' | 'video';
 }
 
-export interface PipelineOptions {
-  actions: boolean; // Action Summary
-  chapters: boolean; // Chapters
-  topics: boolean; // Topics
-  highlights: boolean; // Highlights
-  snapshots: boolean; // Visual snapshots
+export interface DestinationPickerSelectionDto {
+  selection_id: string;
+  path: string;
+  name: string;
 }
 
-export type EngineType = 'gemini-3.5-flash' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite';
-export type EffortType = 'Balanced' | 'High' | 'Max';
+export interface CreateSessionRequestDto {
+  source_selection_id: string;
+  destination_selection_id: string;
+  extra_instructions?: string;
+  extraction_options: ExtractionOptionsDto;
+}
+
+export interface AnalysisDeltaDto {
+  attempt_id: string;
+  delta: string;
+  raw_stream: string;
+}
+
+export interface AnalysisErrorDto {
+  attempt_id: string;
+  message: string;
+  raw_stream: string;
+}
+
+export interface PipelineErrorDto {
+  message: string;
+}
+
+export interface SelectedSource {
+  selectionId?: string;
+  path: string;
+  name: string;
+  mediaKind: 'audio' | 'video';
+}
+
+export interface SelectedDestination {
+  selectionId?: string;
+  path: string;
+  name: string;
+}
 
 export interface Speaker {
   id: string;
   initials: string;
   name: string;
   color?: string;
-}
-
-export interface Snapshot {
-  time: string;
-  name: string;
-  description?: string;
-  imageUrl?: string;
-  excluded?: boolean;
 }
 
 export interface Mention {
@@ -62,20 +123,7 @@ export interface DistillationResult {
   timestamp: string;
   markdown: string;
   speakers: Speaker[];
-  snapshots: Snapshot[];
   mentions: Mention[];
   agentNotes: AgentNote[];
   filesystem: FileTreeNode[];
-}
-
-export interface SampleSession {
-  id: string;
-  name: string;
-  description: string;
-  source: SourceFile;
-  context: string;
-  pipeline: PipelineOptions;
-  engine: EngineType;
-  effort: EffortType;
-  result: DistillationResult;
 }

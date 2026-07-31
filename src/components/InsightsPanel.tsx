@@ -9,54 +9,27 @@ import {
   File,
   ChevronDown,
   ChevronRight,
-  User,
   Plus,
-  Trash2,
   AlertTriangle,
   Info,
   Lightbulb,
   Star,
-  Image,
-  Maximize2,
-  CheckCircle2,
-  Clock,
   X
 } from 'lucide-react';
-import { DistillationResult, Speaker, Snapshot, Mention, AgentNote, FileTreeNode } from '../types';
+import { DistillationResult, Speaker, Mention, AgentNote, FileTreeNode } from '../types';
 import GlassModal from './GlassModal';
 
 interface InsightsPanelProps {
   result: DistillationResult | null;
   setResult: React.Dispatch<React.SetStateAction<DistillationResult | null>>;
-  onCommit: () => void;
-  trashSourceAfterCommit: boolean;
-  setTrashSourceAfterCommit: (trash: boolean) => void;
 }
 
 export default function InsightsPanel({
   result,
-  setResult,
-  onCommit,
-  trashSourceAfterCommit,
-  setTrashSourceAfterCommit
+  setResult
 }: InsightsPanelProps) {
   // Modal viewer states
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
-  const [activeSnapshot, setActiveSnapshot] = useState<Snapshot | null>(null);
-  const [showSnapshotsPreview, setShowSnapshotsPreview] = useState(false);
-
-  const toggleSnapshotExcluded = (index: number) => {
-    if (!result) return;
-    const updatedSnapshots = [...result.snapshots];
-    updatedSnapshots[index] = {
-      ...updatedSnapshots[index],
-      excluded: !updatedSnapshots[index].excluded
-    };
-    setResult({
-      ...result,
-      snapshots: updatedSnapshots
-    });
-  };
 
   // Speaker creation states
   const [showAddSpeaker, setShowAddSpeaker] = useState(false);
@@ -229,29 +202,7 @@ export default function InsightsPanel({
           <h2 className="font-sans font-semibold text-xs tracking-wider text-muted-canvas uppercase">Insights & Assets</h2>
         </div>
 
-        {/* Commit Actions inside header to save valuable vertical room */}
-        {result && (
-          <div className="flex items-center space-x-3.5">
-            {/* Trash option */}
-            <label className="flex items-center space-x-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={trashSourceAfterCommit}
-                onChange={(e) => setTrashSourceAfterCommit(e.target.checked)}
-                className="rounded border-muted-canvas bg-input-canvas text-main-canvas focus:ring-0 w-3.5 h-3.5 cursor-pointer"
-              />
-              <span className="text-xs font-mono text-muted-canvas uppercase tracking-wider">Trash Source</span>
-            </label>
-
-            {/* Commit Trigger */}
-            <button
-              onClick={onCommit}
-              className="px-4 py-1.5 bg-main-canvas text-app-canvas accent-button font-sans font-bold text-xs tracking-wider uppercase rounded transition-all cursor-pointer shadow-sm"
-            >
-              Commit
-            </button>
-          </div>
-        )}
+        {result && <span className="text-[10px] font-mono text-muted-canvas uppercase">Review only · source untouched</span>}
       </div>
 
       {/* Main Column Scroll Area */}
@@ -413,67 +364,7 @@ export default function InsightsPanel({
               </div>
             </div>
 
-            {/* 5. Snapshots Section - Renamed and upgraded with exclusion/curation preview flow */}
-            {result.snapshots && result.snapshots.length > 0 && (
-              <div className="border-b border-muted-canvas pb-3">
-                <div className="flex justify-between items-center mb-1.5">
-                  <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider">Snapshots</div>
-                  <button
-                    onClick={() => setShowSnapshotsPreview(true)}
-                    className="text-[10px] text-orange-500 hover:underline font-bold uppercase tracking-wider cursor-pointer"
-                  >
-                    Curate ({result.snapshots.filter(s => !s.excluded).length}/{result.snapshots.length})
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  {result.snapshots.map((snap, sIdx) => (
-                    <div
-                      key={sIdx}
-                      onClick={() => setShowSnapshotsPreview(true)}
-                      className={`group relative rounded border transition-all duration-200 overflow-hidden cursor-pointer ${
-                        snap.excluded
-                          ? 'border-rose-500/20 bg-rose-500/5 opacity-50'
-                          : 'border-muted-canvas bg-input-canvas/30 hover:border-active-canvas'
-                      }`}
-                    >
-                      {snap.imageUrl ? (
-                        <div className="relative h-16 overflow-hidden bg-input-canvas flex items-center justify-center">
-                          <img
-                            src={snap.imageUrl}
-                            alt={snap.name}
-                            referrerPolicy="no-referrer"
-                            className={`w-full h-full object-cover transition-transform duration-200 group-hover:scale-102 ${
-                              snap.excluded ? 'grayscale blur-[1px]' : ''
-                            }`}
-                          />
-                          <div className="absolute bottom-1 left-1 px-1 py-0.5 bg-black/75 rounded font-mono text-[9px] text-white">
-                            {snap.time}
-                          </div>
-                          {snap.excluded && (
-                            <div className="absolute inset-0 bg-rose-500/15 flex items-center justify-center">
-                              <span className="text-[8px] font-mono font-bold bg-rose-600 text-white px-1 py-0.5 rounded tracking-widest">DENIED</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="h-16 flex flex-col items-center justify-center text-muted-canvas">
-                          <Image size={14} />
-                          <span className="text-[9px] font-mono mt-0.5">{snap.time}</span>
-                        </div>
-                      )}
-                      <div className="p-1 px-1.5">
-                        <div className={`text-[11px] font-sans truncate ${snap.excluded ? 'line-through text-muted-canvas/60' : 'text-main-canvas font-medium'}`}>
-                          {snap.name}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 6. Agent Notes - Released padding, borderless simple lists */}
+            {/* Agent Notes - Released padding, borderless simple lists */}
             {result.agentNotes && result.agentNotes.length > 0 && (
               <div>
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1.5">
@@ -520,11 +411,6 @@ export default function InsightsPanel({
             </div>
 
             <div className="p-4 rounded border border-dashed border-muted-canvas bg-input-canvas/10 text-center">
-              <div className="text-xs font-sans text-muted-canvas font-semibold mb-1">Visual Snapshot Timelines</div>
-              <p className="text-xs font-mono text-muted-canvas/60 uppercase">Key video frame captures mapped natively</p>
-            </div>
-
-            <div className="p-4 rounded border border-dashed border-muted-canvas bg-input-canvas/10 text-center">
               <div className="text-xs font-sans text-muted-canvas font-semibold mb-1">Intel Indexing</div>
               <p className="text-xs font-mono text-muted-canvas/60 uppercase">Semantic concept entities traced in run</p>
             </div>
@@ -543,91 +429,6 @@ export default function InsightsPanel({
         </pre>
       </GlassModal>
 
-      {/* Snapshots Curation Modal */}
-      <GlassModal
-        isOpen={showSnapshotsPreview}
-        onClose={() => setShowSnapshotsPreview(false)}
-        title="Snapshots Curation Feed"
-        size="full"
-      >
-        <div className="space-y-4">
-          <div className="p-3 bg-panel-canvas border border-muted-canvas rounded-xl flex items-center justify-between text-xs font-sans">
-            <div>
-              <span className="font-bold text-main-canvas">Curation Flow:</span> Toggle video captures as inaccurate to filter them from downstream pipeline processing and indexing.
-            </div>
-            <div className="font-mono bg-input-canvas px-2.5 py-1 rounded border border-muted-canvas/60 text-main-canvas text-[11px] whitespace-nowrap">
-              {result?.snapshots?.filter(s => !s.excluded).length || 0} / {result?.snapshots?.length || 0} Active
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-8 max-h-[78vh] overflow-y-auto pr-1">
-            {result?.snapshots?.map((snap, idx) => (
-              <div
-                key={idx}
-                className={`flex flex-col rounded-2xl border transition-all duration-300 shadow-lg bg-panel-canvas overflow-hidden ${
-                  snap.excluded
-                    ? 'border-rose-500/20'
-                    : 'border-muted-canvas hover:border-active-canvas hover:shadow-xl'
-                }`}
-              >
-                {/* Header row: metadata and quick action button (No overlays!) */}
-                <div className="p-4 flex items-center justify-between gap-4 border-b border-muted-canvas/60">
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="bg-black/70 border border-muted-canvas/20 px-2 py-0.5 rounded font-mono text-[11px] font-semibold text-white">
-                        {snap.time}
-                      </span>
-                      <h4 className={`font-sans font-bold text-main-canvas text-base leading-none truncate ${snap.excluded ? 'line-through text-muted-canvas/60' : ''}`} title={snap.name}>
-                        {snap.name}
-                      </h4>
-                      {snap.excluded && (
-                        <span className="bg-rose-500/10 border border-rose-500/20 text-rose-500 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider">
-                          Excluded
-                        </span>
-                      )}
-                    </div>
-                    {snap.description && (
-                      <p className={`font-sans text-xs text-muted-canvas leading-relaxed ${snap.excluded ? 'italic text-muted-canvas/50' : ''}`}>
-                        {snap.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Toggle Exclude Action Button (Just an X / Plus) */}
-                  <button
-                    onClick={() => toggleSnapshotExcluded(idx)}
-                    title={snap.excluded ? 'Restore Frame' : 'Exclude Frame'}
-                    className={`p-2 rounded-full border transition-all duration-200 hover:scale-[1.05] active:scale-95 cursor-pointer flex-shrink-0 ${
-                      snap.excluded
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20'
-                        : 'bg-rose-500/10 border-rose-500/20 text-rose-500 hover:bg-rose-500/20'
-                    }`}
-                  >
-                    {snap.excluded ? <Plus size={16} className="stroke-[2.5]" /> : <X size={16} className="stroke-[2.5]" />}
-                  </button>
-                </div>
-
-                {/* Clean, unobstructed Image Area optimized for clear human analysis of all details */}
-                <div className={`relative w-full overflow-hidden bg-black/40 ${snap.excluded ? 'grayscale opacity-40 blur-[1px]' : ''}`}>
-                  {snap.imageUrl ? (
-                    <img
-                      src={snap.imageUrl}
-                      alt={snap.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-auto max-h-[85vh] object-contain mx-auto block"
-                    />
-                  ) : (
-                    <div className="w-full h-64 flex flex-col items-center justify-center text-muted-canvas">
-                      <Image size={48} />
-                      <span className="text-sm font-mono mt-2">No Image Capture</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </GlassModal>
     </div>
   );
 }

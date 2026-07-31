@@ -11,34 +11,22 @@ import {
   Activity,
   Volume2,
   Video,
-  Globe,
-  Layers,
-  ArrowRight
+  Layers
 } from 'lucide-react';
-import { SourceFile, DistillationResult, SampleSession } from '../types';
+import { DistillationResult } from '../types';
 
 interface DistillationPanelProps {
-  source: SourceFile | null;
   result: DistillationResult | null;
-  setResult: React.Dispatch<React.SetStateAction<DistillationResult | null>>;
   isProcessing: boolean;
   processTime: string;
-  samples: SampleSession[];
-  onLoadSample: (sampleId: string) => void;
-  triggerFileSelect: () => void;
   markdownText: string;
   setMarkdownText: (text: string) => void;
 }
 
 export default function DistillationPanel({
-  source,
   result,
-  setResult,
   isProcessing,
   processTime,
-  samples,
-  onLoadSample,
-  triggerFileSelect,
   markdownText,
   setMarkdownText
 }: DistillationPanelProps) {
@@ -222,7 +210,7 @@ export default function DistillationPanel({
       <div className="flex items-center justify-between border-b border-muted-canvas px-4 py-3 bg-input-canvas/30">
         <div className="flex items-center space-x-2">
           <Layers size={14} className="text-muted-canvas" />
-          <h2 className="font-sans font-semibold text-xs tracking-wider text-muted-canvas uppercase">Document</h2>
+          <h2 className="font-sans font-semibold text-xs tracking-wider text-muted-canvas uppercase">Final Review</h2>
         </div>
 
         {/* State Toggle & Buttons */}
@@ -337,76 +325,7 @@ export default function DistillationPanel({
               />
             )}
           </div>
-        ) : (
-          /* Empty / Initial Dropzone & Sample Syncs State - Quiet Linen style */
-          <div className="flex flex-col items-center justify-center h-full text-center py-10">
-            {/* Elegant Low Key Visual Icon stacking */}
-            <div className="relative flex items-center justify-center w-32 h-32 mb-6 select-none">
-              <div className="absolute w-20 h-20 rotate-[15deg] rounded bg-input-canvas border border-muted-canvas/60" />
-              <div className="absolute w-20 h-20 rotate-[45deg] rounded bg-input-canvas/50 border border-muted-canvas/40" />
-              <div className="absolute w-20 h-20 rotate-[75deg] rounded bg-input-canvas/20 border border-muted-canvas/20" />
-              <div className="relative flex items-center justify-center w-10 h-10 rounded-full bg-input-canvas border border-muted-canvas text-muted-canvas">
-                <Volume2 size={18} className="animate-pulse" />
-              </div>
-            </div>
-
-            <h1 className="font-sans font-bold text-base text-main-canvas tracking-tight mb-2">
-              Quiet Distillation Center
-            </h1>
-            <p className="font-sans text-sm text-muted-canvas max-w-md leading-relaxed mb-6">
-              Consolidate spoken dialogs and media frames into structured layouts. Load a sample preset below or drop a source to begin.
-            </p>
-
-            <button
-              onClick={triggerFileSelect}
-              className="px-5 py-2 rounded border border-muted-canvas hover:border-active-canvas bg-input-canvas hover:bg-input-canvas/80 text-main-canvas font-sans font-semibold text-xs tracking-wider uppercase transition-all duration-200 mb-8 cursor-pointer"
-            >
-              Select File Source
-            </button>
-
-            {/* Quick pre-sets launcher */}
-            <div className="w-full max-w-md border-t border-muted-canvas pt-6 mt-2">
-              <div className="text-xs font-mono text-muted-canvas uppercase tracking-widest mb-3">
-                Sample Preloaded Sessions
-              </div>
-              <div className="grid grid-cols-1 gap-2">
-                {samples.map((sample) => (
-                  <div
-                    key={sample.id}
-                    onClick={() => onLoadSample(sample.id)}
-                    className="flex items-center justify-between p-3 rounded-xl border border-muted-canvas bg-input-canvas/30 hover:bg-input-canvas/70 cursor-pointer text-left transition-colors group"
-                  >
-                    <div className="overflow-hidden pr-2">
-                      <div className="text-sm font-semibold text-main-canvas group-hover:underline transition-all truncate">
-                        {sample.name}
-                      </div>
-                      <div className="text-xs text-muted-canvas truncate mt-0.5">
-                        {sample.description}
-                      </div>
-                    </div>
-                    <ArrowRight size={12} className="text-muted-canvas group-hover:text-main-canvas group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Sub-icons footer */}
-            <div className="flex items-center space-x-6 text-xs text-muted-canvas font-mono uppercase tracking-widest mt-10">
-              <div className="flex items-center space-x-1.5">
-                <Volume2 size={12} />
-                <span>Audio</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <Video size={12} />
-                <span>Video</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <Globe size={12} />
-                <span>URL</span>
-              </div>
-            </div>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
