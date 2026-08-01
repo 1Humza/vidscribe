@@ -41,6 +41,14 @@ export function pickSource(initialPath?: string): Promise<SourcePickerSelectionD
   return postJson('/api/pickers/source', initialPath ? { initial_path: initialPath } : {});
 }
 
+export function pickCompletedSessionFolder(): Promise<SourcePickerSelectionDto> {
+  return postJson('/api/pickers/completed-session', {});
+}
+
+export function openCompletedSession(sourceSelectionId: string): Promise<SessionViewDto> {
+  return postJson('/api/sessions/open-completed', { source_selection_id: sourceSelectionId });
+}
+
 export function pickDestination(initialPath?: string): Promise<DestinationPickerSelectionDto> {
   return postJson('/api/pickers/destination', initialPath ? { initial_path: initialPath } : {});
 }
@@ -80,6 +88,13 @@ export function updateReview(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(update),
   });
+}
+
+export function commitSession(sessionId: string, attemptId: string): Promise<SessionViewDto> {
+  return requestJson(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/commit`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 export function getSession(id: string, signal?: AbortSignal): Promise<SessionViewDto> {

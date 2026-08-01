@@ -1,6 +1,7 @@
 import re
 from datetime import date
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -10,9 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from vidscribe.analysis import Analyzer, DeterministicAnalyzer, GeminiAnalyzer
 from vidscribe.config import Settings
 from vidscribe.database import SessionRepository
+from vidscribe.finalization import DestinationConflict, FinalizationError, SessionFinalizer
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import (
     CreateSessionRequest,
+    OpenCompletedSessionRequest,
     PickerRequest,
     PickerSelection,
     ReviewUpdate,
@@ -34,6 +37,7 @@ def create_app(
     transcriber: Transcriber | None = None,
     analyzer: Analyzer | None = None,
     media_preparer: FFmpegMediaPreparer | None = None,
+    finalizer: SessionFinalizer | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings()
     assert app_settings.database_path is not None
@@ -83,6 +87,8 @@ def create_app(
         active_analyzer,
     )
     app.state.pipeline = pipeline
+    app.state.finalizer = finalizer or SessionFinalizer()
+    app.state.service_id = str(uuid4())
 
     @app.middleware("http")
     async def enforce_loopback_host(request: Request, call_next):
@@ -138,19 +144,63 @@ def create_app(
 
     @app.post("/api/pickers/source", response_model=PickerSelection)
     def choose_source(request: PickerRequest) -> PickerSelection:
-        selected = app.state.picker.choose_source(
-            Path(request.initial_path) if request.initial_path else None
-        )
+        try:
+            selected = app.state.picker.choose_source(
+                Path(request.initial_path) if request.initial_path else None
+            )
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
         if selected is None:
             raise HTTPException(status_code=409, detail="Source Media selection cancelled")
+        if selected.is_dir():
+            return PickerSelection(
+                selection_id=selections.issue("source", selected),
+                path=str(selected.resolve()),
+                name=selected.name,
+                media_kind=None,
+            )
         if not selected.is_file():
-            raise HTTPException(status_code=422, detail="Selected Source Media is not a file")
+            raise HTTPException(status_code=422, detail="Selected Source Media is not a file or folder")
         audio_extensions = {".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".wav"}
         return PickerSelection(
             selection_id=selections.issue("source", selected),
             path=str(selected.resolve()),
             name=selected.name,
             media_kind="audio" if selected.suffix.lower() in audio_extensions else "video",
+        )
+
+    @app.post("/api/sessions/open-completed", response_model=SessionView)
+    def open_completed_session(request: OpenCompletedSessionRequest) -> SessionView:
+        try:
+            folder = selections.resolve(request.source_selection_id, "source")
+        except KeyError as error:
+            raise HTTPException(
+                status_code=422, detail="Picker selection is invalid or expired"
+            ) from error
+        if not folder.is_dir():
+            raise HTTPException(status_code=422, detail="Select a Completed Session Folder")
+        try:
+            return repository.get_by_completed_folder(folder)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Completed Session not found") from error
+
+    @app.post("/api/pickers/completed-session", response_model=PickerSelection)
+    def choose_completed_session(request: PickerRequest) -> PickerSelection:
+        try:
+            selected = app.state.picker.choose_completed_session_folder(
+                Path(request.initial_path) if request.initial_path else None
+            )
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        if selected is None:
+            raise HTTPException(status_code=409, detail="Completed Session selection cancelled")
+        if not selected.is_dir():
+            raise HTTPException(status_code=422, detail="Selected Completed Session is not a folder")
+        return PickerSelection(
+            selection_id=selections.issue("source", selected),
+            path=str(selected.resolve()),
+            name=selected.name,
+            media_kind=None,
         )
 
     @app.post(
@@ -208,6 +258,8 @@ def create_app(
             session = repository.get(session_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
+        if session.status == "finalizing":
+            raise HTTPException(status_code=409, detail="Session commit is in progress")
         attempt = next((item for item in session.attempts if item.id == attempt_id), None)
         if attempt is None or attempt.result is None:
             raise HTTPException(status_code=404, detail="Completed Analysis Attempt not found")
@@ -251,12 +303,93 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Completed Analysis Attempt not found") from error
 
+    @app.post(
+        "/api/sessions/{session_id}/attempts/{attempt_id}/commit",
+        response_model=SessionView,
+    )
+    def commit_session(session_id: str, attempt_id: str) -> SessionView:
+        try:
+            current = repository.get(session_id)
+            cross_volume = False
+            if current.status in {"review", "needs_attention"}:
+                cross_volume = not app.state.finalizer.paths_share_volume(
+                    Path(current.source_path), Path(current.destination_path)
+                )
+            claim = repository.claim_commit(
+                session_id,
+                attempt_id,
+                service_id=app.state.service_id,
+                cross_volume=cross_volume,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Session not found") from error
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail="Completed Analysis Attempt not found") from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        session = claim.session
+        if session.status == "completed":
+            attempt = next(item for item in session.attempts if item.id == attempt_id)
+            assert attempt.result is not None
+            try:
+                app.state.finalizer.overwrite_completed_record(session, attempt.result)
+            except FinalizationError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            return session
+        attempt = next(item for item in session.attempts if item.id == attempt_id)
+        assert attempt.result is not None
+        if claim.resumes_finalization:
+            try:
+                assets = app.state.finalizer.recover_published(
+                    session, attempt.result, cross_volume=bool(claim.cross_volume)
+                )
+            except FinalizationError as error:
+                repository.update_session(
+                    session_id, status="needs_attention", stage="review", progress=100
+                )
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            return repository.update_session(
+                session_id,
+                status="completed",
+                stage="completed",
+                progress=100,
+                source_path=str(assets.source_path),
+                analysis_audio_path=str(assets.analysis_audio_path),
+                completed_folder_path=str(assets.folder_path),
+                finalizing_attempt_id=None,
+                finalizing_service_id=None,
+                finalizing_cross_volume=None,
+            )
+        try:
+            assets = app.state.finalizer.finalize(session, attempt.result)
+        except DestinationConflict as error:
+            return repository.update_session(
+                session_id, status="needs_attention", stage="review", progress=100
+            )
+        except FinalizationError as error:
+            repository.update_session(session_id, status="needs_attention", stage="review", progress=100)
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return repository.update_session(
+            session_id,
+            status="completed",
+            stage="completed",
+            progress=100,
+            source_path=str(assets.source_path),
+            analysis_audio_path=str(assets.analysis_audio_path),
+            completed_folder_path=str(assets.folder_path),
+            finalizing_attempt_id=None,
+            finalizing_service_id=None,
+            finalizing_cross_volume=None,
+        )
+
     @app.post("/api/sessions/{session_id}/execute")
     def execute_session(session_id: str) -> StreamingResponse:
         try:
-            repository.get(session_id)
+            session = repository.get(session_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
+        if session.status in {"completed", "finalizing"}:
+            raise HTTPException(status_code=409, detail="Completed Sessions are readonly")
         return StreamingResponse(
             pipeline.execute(session_id),
             media_type="text/event-stream",

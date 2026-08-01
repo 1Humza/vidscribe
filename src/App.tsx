@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, HelpCircle, Moon, Sun, Workflow, X } from 'lucide-react';
-import { createSession, executeSession, getSession, pickAttachments, pickDestination, pickSource, updateReview, type SessionEvent } from './api';
+import { commitSession, createSession, executeSession, getSession, openCompletedSession, pickAttachments, pickDestination, pickSource, updateReview, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -9,6 +9,7 @@ import type {
   AnalysisResultDto,
   DistillationResult,
   ExtractionOptionsDto,
+  FileTreeNode,
   SelectedDestination,
   SelectedAttachment,
   SelectedSource,
@@ -53,10 +54,44 @@ function intakeFromSession(extraInstructions: string, speakerHints: string[] | u
     : { context: extraInstructions, speakers: '' };
 }
 
-function toReview(result: AnalysisResultDto, markdown: string, createdAt: string): DistillationResult {
+function completedBasename(session: SessionViewDto, result: AnalysisResultDto) {
+  const asciiTitle = result.short_name.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
+  const slug = asciiTitle.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return `${session.session_date}-${slug || 'session'}`;
+}
+
+function sourceExtension(path: string) {
+  const name = fileName(path);
+  const extensionAt = name.lastIndexOf('.');
+  return extensionAt === -1 ? '' : name.slice(extensionAt);
+}
+
+function filesystemPreview(
+  session: SessionViewDto,
+  result: AnalysisResultDto,
+  markdown: string,
+): FileTreeNode[] {
+  const basename = completedBasename(session, result);
+  const folderName = session.completed_folder_path ? fileName(session.completed_folder_path) : basename;
+  return [{
+    name: folderName,
+    type: 'directory',
+    children: [
+      { name: `${basename}.md`, type: 'file', content: markdown },
+      { name: `${basename}.24k.ogg`, type: 'file' },
+      { name: `${basename}${sourceExtension(session.source_path)}`, type: 'file' },
+    ],
+  }];
+}
+
+function toReview(
+  session: SessionViewDto,
+  result: AnalysisResultDto,
+  markdown: string,
+): DistillationResult {
   return {
     title: result.short_name,
-    timestamp: formatTimestamp(result.session_date, createdAt),
+    timestamp: formatTimestamp(result.session_date, session.created_at),
     markdown,
     speakers: result.speaker_labels.map((name, index) => ({
       id: `speaker-${index + 1}`,
@@ -65,7 +100,7 @@ function toReview(result: AnalysisResultDto, markdown: string, createdAt: string
     })),
     mentions: [],
     agentNotes: [],
-    filesystem: [],
+    filesystem: filesystemPreview(session, result, markdown),
   };
 }
 
@@ -97,6 +132,7 @@ export default function App() {
   const [pickerBusy, setPickerBusy] = useState<'source' | 'destination' | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'fading'>('idle');
+  const [isCommitting, setIsCommitting] = useState(false);
   const executeAbortRef = useRef<AbortController | null>(null);
   const reviewSaveQueueRef = useRef(Promise.resolve());
   const pendingReviewSavesRef = useRef(0);
@@ -106,10 +142,16 @@ export default function App() {
 
   const validatedResult = latestResult(session);
   const review = useMemo(
-    () => validatedResult ? toReview(validatedResult, reviewMarkdown || validatedResult.session_record_markdown, session?.created_at || '') : null,
-    [validatedResult, reviewMarkdown, session?.created_at],
+    () => session && validatedResult
+      ? toReview(session, validatedResult, reviewMarkdown || validatedResult.session_record_markdown)
+      : null,
+    [session, validatedResult, reviewMarkdown],
   );
   const hasOutput = Boolean(analysisPreview || review);
+  const isReviewReadOnly = session?.status === 'finalizing';
+  const canCommit = Boolean(
+    session && validatedResult && ['review', 'needs_attention', 'completed'].includes(session.status),
+  );
 
   const applySession = (next: SessionViewDto, selectedSource?: SelectedSource, preserveMarkdownDraft = false) => {
     setSession(next);
@@ -176,6 +218,10 @@ export default function App() {
     setErrorNotice(null);
     try {
       const selected = await pickSource(source?.path);
+      if (selected.media_kind === null) {
+        applySession(await openCompletedSession(selected.selection_id));
+        return;
+      }
       const selectedSource = { selectionId: selected.selection_id, path: selected.path, name: selected.name, mediaKind: selected.media_kind };
       setSource(selectedSource);
       setSession(null);
@@ -336,6 +382,28 @@ export default function App() {
     setErrorNotice('Execution was stopped. The source media remains untouched.');
   };
 
+  const commitReview = async () => {
+    const attempt = session?.attempts.at(-1);
+    if (!session || !attempt?.result || !canCommit) return;
+    setIsCommitting(true);
+    setErrorNotice(null);
+    try {
+      if (reviewMarkdown !== attempt.result.session_record_markdown) {
+        await saveReview({ session_record_markdown: reviewMarkdown }, markdownVersionRef.current);
+      }
+      await reviewSaveQueueRef.current;
+      const committed = await commitSession(session.id, attempt.id);
+      applySession(committed);
+      if (committed.status === 'needs_attention') {
+        setErrorNotice('A Completed Session Folder with this name already exists. Update the Short Name, then commit again.');
+      }
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The Session could not be committed. Source Media remains untouched.'));
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+
   const scrollToIntake = () => intakeRef.current?.scrollIntoView({ behavior: 'smooth' });
   const scrollToOutput = () => outputRef.current?.scrollIntoView({ behavior: 'smooth' });
 
@@ -423,6 +491,7 @@ export default function App() {
               onSaveMarkdown={() => saveReview({ session_record_markdown: reviewMarkdown }, markdownVersionRef.current)}
               saveStatus={saveStatus}
               onSelectSource={selectSource}
+              isReadOnly={isReviewReadOnly}
             />
           </section>
           <section className="lg:col-span-5 flex flex-col h-full overflow-hidden">
@@ -432,6 +501,10 @@ export default function App() {
               onRenameSpeaker={(from, to) => saveReview({ speaker_renames: { [from]: to } })}
               onReviewEdit={() => setSaveStatus('idle')}
               saveStatus={saveStatus}
+              onCommit={commitReview}
+              canCommit={canCommit}
+              isCommitPending={isCommitting}
+              isReadOnly={isReviewReadOnly}
             />
           </section>
         </div>

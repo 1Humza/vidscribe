@@ -77,6 +77,16 @@ describe('issue 2 session UI', () => {
         stage: 'review',
         progress: 100,
         attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '07-31-2026', speaker_labels: ['Speaker 1'] } }],
+      }))
+      .mockImplementationOnce(() => json({
+        ...session,
+        status: 'completed',
+        stage: 'completed',
+        progress: 100,
+        source_path: '/archive/syncs/2026-07-31-renamed-meeting.mp4',
+        analysis_audio_path: '/archive/syncs/2026-07-31-renamed-meeting.24k.ogg',
+        completed_folder_path: '/archive/syncs/2026-07-31-renamed-meeting',
+        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '07-31-2026', speaker_labels: ['Speaker 1'] } }],
       }));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
@@ -93,7 +103,11 @@ describe('issue 2 session UI', () => {
 
     const review = await screen.findByRole('region', { name: 'Final Review' });
     expect(review).toHaveTextContent('(Silence 00:16)');
-    expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+    expect(screen.getByText('2026-07-31-team-sync')).toBeInTheDocument();
+    expect(screen.getByText('2026-07-31-team-sync.md')).toBeInTheDocument();
+    expect(screen.getByText('2026-07-31-team-sync.24k.ogg')).toBeInTheDocument();
+    expect(screen.getByText('2026-07-31-team-sync.mp4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview Snapshots (pending)' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
@@ -113,6 +127,13 @@ describe('issue 2 session UI', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     expect((fetchMock.mock.calls[4][1] as RequestInit).method).toBe('PATCH');
     expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Commit' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    const commitRequest = fetchMock.mock.calls[5][1] as RequestInit;
+    expect(commitRequest.method).toBe('POST');
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
   });
 
   it('keeps cancellation visible but pending until durable cancellation exists', async () => {

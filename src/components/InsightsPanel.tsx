@@ -26,6 +26,10 @@ interface InsightsPanelProps {
   onRenameSpeaker: (from: string, to: string) => void;
   onReviewEdit: () => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
+  onCommit: () => void;
+  canCommit: boolean;
+  isCommitPending: boolean;
+  isReadOnly: boolean;
 }
 
 interface ReviewSnapshot {
@@ -40,7 +44,7 @@ type ResultWithSnapshots = DistillationResult & { snapshots?: ReviewSnapshot[] }
 
 const pendingActionTitle = 'This control is visible for the planned workflow and is not active yet.';
 
-export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, saveStatus }: InsightsPanelProps) {
+export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [showSnapshotsPreview, setShowSnapshotsPreview] = useState(false);
   const [fsExpanded, setFsExpanded] = useState<Record<string, boolean>>({
@@ -139,11 +143,12 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
 
             <button
               type="button"
-              disabled
-              title={pendingActionTitle}
-              className="px-4 py-1.5 bg-main-canvas text-app-canvas accent-button font-sans font-bold text-xs tracking-wider uppercase rounded transition-all cursor-not-allowed shadow-sm opacity-50"
+              onClick={onCommit}
+              disabled={!canCommit || isCommitPending}
+              title={isReadOnly ? 'This Session has been committed and is readonly.' : undefined}
+              className={`px-4 py-1.5 bg-main-canvas text-app-canvas accent-button font-sans font-bold text-xs tracking-wider uppercase rounded transition-all shadow-sm ${canCommit && !isCommitPending ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             >
-              Commit
+              {isCommitPending ? 'Committing…' : isReadOnly ? 'Completed' : 'Commit'}
             </button>
           </div>
         )}
@@ -160,6 +165,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
                   key={`title-${result.title}`}
                   defaultValue={result.title}
                   onChange={onReviewEdit}
+                  disabled={isReadOnly}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       event.preventDefault();
@@ -215,6 +221,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
                         key={`${speaker.id}-${speaker.name}`}
                         defaultValue={speaker.name}
                         onChange={onReviewEdit}
+                        disabled={isReadOnly}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter') {
                             event.preventDefault();

@@ -24,8 +24,8 @@ export interface AnalysisAttemptDto {
   error: string | null;
 }
 
-export type SessionStatus = 'ready' | 'processing' | 'review' | 'error';
-export type SessionStage = 'intake' | 'preparing' | 'transcribing' | 'analyzing' | 'review';
+export type SessionStatus = 'ready' | 'processing' | 'review' | 'error' | 'finalizing' | 'needs_attention' | 'completed';
+export type SessionStage = 'intake' | 'preparing' | 'transcribing' | 'analyzing' | 'review' | 'completed';
 
 export interface SessionViewDto {
   id: string;
@@ -41,6 +41,7 @@ export interface SessionViewDto {
   transcript: string | null;
   session_date: string;
   attachment_paths: string[];
+  completed_folder_path?: string | null;
   attempts: AnalysisAttemptDto[];
   created_at: string;
   updated_at: string;
@@ -50,7 +51,7 @@ export interface SourcePickerSelectionDto {
   selection_id: string;
   path: string;
   name: string;
-  media_kind: 'audio' | 'video';
+  media_kind: 'audio' | 'video' | null;
 }
 
 export interface DestinationPickerSelectionDto {

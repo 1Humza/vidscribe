@@ -1,12 +1,20 @@
 import json
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
 
 from vidscribe.models import AnalysisResult, ResolvedSessionIntake, SessionView
+
+
+@dataclass(frozen=True)
+class CommitClaim:
+    session: SessionView
+    resumes_finalization: bool
+    cross_volume: bool | None = None
 
 
 class SessionRepository:
@@ -46,6 +54,10 @@ class SessionRepository:
                     session_date TEXT,
                     attachment_paths TEXT NOT NULL DEFAULT '[]',
                     transcript_word_timings TEXT NOT NULL DEFAULT '[]',
+                    completed_folder_path TEXT,
+                    finalizing_attempt_id TEXT,
+                    finalizing_service_id TEXT,
+                    finalizing_cross_volume INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -80,6 +92,14 @@ class SessionRepository:
                 connection.execute(
                     "ALTER TABLE sessions ADD COLUMN transcript_word_timings TEXT NOT NULL DEFAULT '[]'"
                 )
+            if "completed_folder_path" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN completed_folder_path TEXT")
+            if "finalizing_attempt_id" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN finalizing_attempt_id TEXT")
+            if "finalizing_service_id" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN finalizing_service_id TEXT")
+            if "finalizing_cross_volume" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN finalizing_cross_volume INTEGER")
 
     def create(self, request: ResolvedSessionIntake) -> SessionView:
         session_id = str(uuid4())
@@ -132,6 +152,16 @@ class SessionRepository:
         ]
         return SessionView.model_validate(payload)
 
+    def get_by_completed_folder(self, folder_path: Path) -> SessionView:
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT id FROM sessions WHERE completed_folder_path = ?",
+                (str(folder_path.resolve()),),
+            ).fetchone()
+        if row is None:
+            raise KeyError(str(folder_path))
+        return self.get(row["id"])
+
     def update_session(self, session_id: str, **changes: object) -> SessionView:
         allowed = {
             "status",
@@ -140,6 +170,11 @@ class SessionRepository:
             "analysis_audio_path",
             "transcript",
             "transcript_word_timings",
+            "source_path",
+            "completed_folder_path",
+            "finalizing_attempt_id",
+            "finalizing_service_id",
+            "finalizing_cross_volume",
         }
         unexpected = set(changes) - allowed
         if unexpected:
@@ -158,6 +193,49 @@ class SessionRepository:
             if cursor.rowcount == 0:
                 raise KeyError(session_id)
         return self.get(session_id)
+
+    def claim_commit(
+        self, session_id: str, attempt_id: str, *, service_id: str, cross_volume: bool
+    ) -> CommitClaim:
+        with self.connection() as connection:
+            session = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if session is None:
+                raise KeyError(session_id)
+            attempt = connection.execute(
+                "SELECT result FROM analysis_attempts WHERE id = ? AND session_id = ? AND status = 'completed'",
+                (attempt_id, session_id),
+            ).fetchone()
+            if attempt is None or attempt["result"] is None:
+                raise LookupError(attempt_id)
+            if session["status"] == "completed":
+                return CommitClaim(
+                    session=self.get(session_id), resumes_finalization=False
+                )
+            if session["status"] == "finalizing":
+                if session["finalizing_attempt_id"] != attempt_id:
+                    raise RuntimeError("A different Analysis Attempt is already committing")
+                if session["finalizing_service_id"] == service_id:
+                    raise RuntimeError("Session commit is already in progress")
+                return CommitClaim(
+                    session=self.get(session_id),
+                    resumes_finalization=True,
+                    cross_volume=bool(session["finalizing_cross_volume"]),
+                )
+            cursor = connection.execute(
+                """
+                UPDATE sessions SET status = 'finalizing', finalizing_attempt_id = ?,
+                finalizing_service_id = ?, finalizing_cross_volume = ?, updated_at = ?
+                WHERE id = ? AND status IN ('review', 'needs_attention')
+                """,
+                (attempt_id, service_id, cross_volume, datetime.now(UTC).isoformat(), session_id),
+            )
+            if cursor.rowcount == 0:
+                raise RuntimeError("Session is not ready to commit")
+        return CommitClaim(
+            session=self.get(session_id), resumes_finalization=False, cross_volume=cross_volume
+        )
 
     def create_attempt(self, session_id: str, model: str, effort: str) -> str:
         attempt_id = str(uuid4())

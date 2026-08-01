@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSession, executeSession } from './api';
+import { commitSession, createSession, executeSession, openCompletedSession, pickCompletedSessionFolder } from './api';
 
 function streamResponse(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -64,6 +64,57 @@ describe('createSession', () => {
         chapters: true,
         highlights: false,
       },
+    });
+  });
+});
+
+describe('commitSession', () => {
+  it('commits the selected reviewed attempt through the local service', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await commitSession('session id', 'attempt id');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/session%20id/attempts/attempt%20id/commit',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+    );
+  });
+});
+
+describe('openCompletedSession', () => {
+  it('opens the native completed-session folder picker', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await pickCompletedSessionFolder();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/pickers/completed-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+  });
+
+  it('resolves a selected Completed Session Folder through the local service', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await openCompletedSession('folder selection');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/open-completed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_selection_id: 'folder selection' }),
     });
   });
 });

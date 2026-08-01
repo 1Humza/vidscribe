@@ -29,6 +29,12 @@ class CreateSessionRequest(BaseModel):
     attachment_selection_ids: list[str] = Field(default_factory=list)
 
 
+class OpenCompletedSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_selection_id: str
+
+
 class ResolvedSessionIntake(BaseModel):
     source_path: str
     destination_path: str
@@ -110,8 +116,10 @@ class AnalysisAttempt(BaseModel):
 
 class SessionView(BaseModel):
     id: str
-    status: Literal["ready", "processing", "review", "error"]
-    stage: Literal["intake", "preparing", "transcribing", "analyzing", "review"]
+    status: Literal[
+        "ready", "processing", "review", "error", "finalizing", "needs_attention", "completed"
+    ]
+    stage: Literal["intake", "preparing", "transcribing", "analyzing", "review", "completed"]
     progress: int
     source_path: str
     destination_path: str
@@ -123,6 +131,7 @@ class SessionView(BaseModel):
     session_date: date
     attachment_paths: list[str] = Field(default_factory=list)
     transcript_word_timings: list[dict[str, object]] = Field(default_factory=list)
+    completed_folder_path: str | None = None
     attempts: list[AnalysisAttempt] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

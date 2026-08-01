@@ -69,6 +69,7 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
         "session_date": "2026-07-31",
         "attachment_paths": [],
         "transcript_word_timings": [],
+        "completed_folder_path": None,
         "attempts": [],
         "created_at": restored.json()["created_at"],
         "updated_at": restored.json()["updated_at"],

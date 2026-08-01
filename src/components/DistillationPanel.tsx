@@ -49,6 +49,7 @@ interface DistillationPanelProps {
   onSaveMarkdown: () => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onSelectSource: () => void;
+  isReadOnly: boolean;
 }
 
 export default function DistillationPanel({
@@ -62,7 +63,8 @@ export default function DistillationPanel({
   setMarkdownText,
   onSaveMarkdown,
   saveStatus,
-  onSelectSource
+  onSelectSource,
+  isReadOnly
 }: DistillationPanelProps) {
   const [viewMode, setViewMode] = useState<'rich' | 'raw'>('raw');
   const [copied, setCopied] = useState(false);
@@ -73,6 +75,7 @@ export default function DistillationPanel({
     transcribing: 'Transcribing the complete recording with Groq Whisper.',
     analyzing: 'Streaming schema-constrained analysis from Gemini.',
     review: 'Validated review is ready.',
+    completed: 'Completed Session Folder is verified and readonly.',
   }[stage];
   const activeStageIndex = PROCESSING_STAGES.findIndex((item) => item.stage === stage);
 
@@ -379,6 +382,7 @@ export default function DistillationPanel({
                   value={markdownText}
                   onChange={(event) => setMarkdownText(event.target.value)}
                   onBlur={onSaveMarkdown}
+                  readOnly={isReadOnly}
                   onKeyDown={(event) => {
                     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                       event.preventDefault();
