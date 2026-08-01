@@ -16,6 +16,7 @@ import {
 import type {
   ExtractionOptionsDto,
   SelectedDestination,
+  SelectedAttachment,
   SelectedSource,
   SessionStage,
 } from '../types';
@@ -29,6 +30,8 @@ interface IntakePanelProps {
   pickerBusy: 'source' | 'destination' | null;
   context: string;
   setContext: (value: string) => void;
+  attachments: SelectedAttachment[];
+  onSelectAttachments: () => void;
   speakers: string;
   setSpeakers: (value: string) => void;
   extractionOptions: ExtractionOptionsDto;
@@ -182,13 +185,13 @@ export default function IntakePanel(props: IntakePanelProps) {
               <button
                 type="button"
                 aria-label="Attach reference files"
-                disabled
-                className="flex items-center space-x-1 text-xs text-muted-canvas font-semibold uppercase cursor-not-allowed opacity-60"
-                title="Reference attachments are pending implementation"
+                onClick={props.onSelectAttachments}
+                disabled={props.isProcessing}
+                className="flex items-center space-x-1 text-xs text-muted-canvas font-semibold uppercase cursor-pointer disabled:opacity-60"
+                title="Attach context files"
               >
                 <Paperclip size={12} />
                 <span>Attach</span>
-                <span className="rounded border border-muted-canvas/70 px-1 py-px font-mono text-[8px] tracking-wider">Pending</span>
               </button>
             </div>
 
@@ -204,13 +207,9 @@ export default function IntakePanel(props: IntakePanelProps) {
                 />
               </div>
 
-              <div className="text-xs font-mono text-muted-canvas flex flex-wrap items-center gap-1.5 pt-1" aria-label="Attachments pending">
+              <div className="text-xs font-mono text-muted-canvas flex flex-wrap items-center gap-1.5 pt-1" aria-label="Attached Context">
                 <span className="font-semibold">Attachments:</span>
-                <span className="inline-flex items-center space-x-1.5 bg-input-canvas border border-muted-canvas/65 px-2 py-0.5 rounded opacity-60" aria-disabled="true">
-                  <Paperclip size={10} />
-                  <span>Reference files</span>
-                  <LockKeyhole size={9} />
-                </span>
+                {props.attachments.length ? props.attachments.map((attachment) => <span key={attachment.path} className="inline-flex items-center space-x-1.5 bg-input-canvas border border-muted-canvas/65 px-2 py-0.5 rounded"><Paperclip size={10} /><span>{attachment.name}</span></span>) : <span>None selected</span>}
               </div>
             </div>
           </div>
@@ -339,9 +338,7 @@ export default function IntakePanel(props: IntakePanelProps) {
           </div>
 
           <div className="space-y-2">
-            <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">
-              Deliverable Target
-            </h2>
+            <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Save to</h2>
             <button
               type="button"
               aria-label="Select Destination"
@@ -350,14 +347,12 @@ export default function IntakePanel(props: IntakePanelProps) {
               className="w-full flex items-center bg-input-canvas border border-muted-canvas rounded-xl px-3 py-2.5 hover:border-active-canvas transition-colors text-left cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Inbox size={15} className="text-muted-canvas mr-2 flex-shrink-0" />
-              <span
-                className={`w-full text-xs font-mono truncate ${props.destination ? 'text-main-canvas' : 'text-muted-canvas'}`}
-                title={props.destination?.path}
-              >
+              <span className={`min-w-0 flex-1 text-left ${props.destination ? 'text-main-canvas' : 'text-muted-canvas'}`} title={props.destination?.path}>
                 {props.pickerBusy === 'destination'
-                  ? 'Opening destination picker…'
-                  : props.destination?.path || 'Select destination folder'}
+                  ? 'Opening output folder picker…'
+                  : props.destination ? <><span className="block text-xs font-semibold truncate">{props.destination.name}</span><span className="block text-[10px] font-mono text-muted-canvas truncate mt-0.5">{props.destination.path}</span></> : <span className="text-xs font-mono">Choose output folder</span>}
               </span>
+              <span className="ml-2 text-[10px] font-mono uppercase tracking-wider text-orange-500">{props.destination ? 'Change' : 'Choose'}</span>
             </button>
           </div>
 

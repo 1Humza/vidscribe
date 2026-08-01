@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, HelpCircle, Moon, Sun, Workflow, X } from 'lucide-react';
-import { createSession, executeSession, getSession, pickDestination, pickSource, type SessionEvent } from './api';
+import { createSession, executeSession, getSession, pickAttachments, pickDestination, pickSource, updateReview, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -10,6 +10,7 @@ import type {
   DistillationResult,
   ExtractionOptionsDto,
   SelectedDestination,
+  SelectedAttachment,
   SelectedSource,
   SessionViewDto,
 } from './types';
@@ -23,10 +24,39 @@ const mediaKindForPath = (path: string): 'audio' | 'video' => {
   return AUDIO_EXTENSIONS.has(extension) ? 'audio' : 'video';
 };
 
-function toReview(result: AnalysisResultDto, markdown: string): DistillationResult {
+function formatTimestamp(sessionDate: string, createdAt: string) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(sessionDate)
+    ? new Date(`${sessionDate}T12:00:00`)
+    : /^\d{2}-\d{2}-\d{4}$/.test(sessionDate)
+      ? new Date(`${sessionDate.slice(6)}-${sessionDate.slice(0, 2)}-${sessionDate.slice(3, 5)}T12:00:00`)
+      : null;
+  const readableDate = date
+    ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+    : sessionDate;
+  const created = new Date(createdAt);
+  const readableTime = Number.isNaN(created.getTime())
+    ? ''
+    : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(created);
+  return [readableDate, readableTime].filter(Boolean).join(' · ');
+}
+
+function intakeFromSession(extraInstructions: string, speakerHints: string[] | undefined) {
+  if (speakerHints?.length) {
+    return { context: extraInstructions, speakers: speakerHints.join(', ') };
+  }
+  const legacyHints = extraInstructions.match(/(?:^|\n)Speaker hints:\s*([^\n]+)\s*$/);
+  return legacyHints
+    ? {
+      context: extraInstructions.slice(0, legacyHints.index).trimEnd(),
+      speakers: legacyHints[1],
+    }
+    : { context: extraInstructions, speakers: '' };
+}
+
+function toReview(result: AnalysisResultDto, markdown: string, createdAt: string): DistillationResult {
   return {
     title: result.short_name,
-    timestamp: result.session_date,
+    timestamp: formatTimestamp(result.session_date, createdAt),
     markdown,
     speakers: result.speaker_labels.map((name, index) => ({
       id: `speaker-${index + 1}`,
@@ -50,6 +80,7 @@ export default function App() {
   const [source, setSource] = useState<SelectedSource | null>(null);
   const [destination, setDestination] = useState<SelectedDestination | null>(null);
   const [context, setContext] = useState('');
+  const [attachments, setAttachments] = useState<SelectedAttachment[]>([]);
   const [speakers, setSpeakers] = useState('');
   const [extractionOptions, setExtractionOptions] = useState<ExtractionOptionsDto>({
     action_summary: true,
@@ -65,35 +96,42 @@ export default function App() {
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [pickerBusy, setPickerBusy] = useState<'source' | 'destination' | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'fading'>('idle');
   const executeAbortRef = useRef<AbortController | null>(null);
+  const reviewSaveQueueRef = useRef(Promise.resolve());
+  const pendingReviewSavesRef = useRef(0);
+  const markdownVersionRef = useRef(0);
   const intakeRef = useRef<HTMLElement>(null);
   const outputRef = useRef<HTMLElement>(null);
 
   const validatedResult = latestResult(session);
   const review = useMemo(
-    () => validatedResult ? toReview(validatedResult, reviewMarkdown || validatedResult.session_record_markdown) : null,
-    [validatedResult, reviewMarkdown],
+    () => validatedResult ? toReview(validatedResult, reviewMarkdown || validatedResult.session_record_markdown, session?.created_at || '') : null,
+    [validatedResult, reviewMarkdown, session?.created_at],
   );
   const hasOutput = Boolean(analysisPreview || review);
 
-  const applySession = (next: SessionViewDto) => {
+  const applySession = (next: SessionViewDto, selectedSource?: SelectedSource, preserveMarkdownDraft = false) => {
     setSession(next);
     setSource((current) => ({
-      selectionId: current?.path === next.source_path ? current.selectionId : undefined,
+      selectionId: selectedSource?.path === next.source_path ? selectedSource.selectionId : current?.path === next.source_path ? current.selectionId : undefined,
       path: next.source_path,
       name: fileName(next.source_path),
-      mediaKind: current?.path === next.source_path ? current.mediaKind : mediaKindForPath(next.source_path),
+      mediaKind: selectedSource?.path === next.source_path ? selectedSource.mediaKind : current?.path === next.source_path ? current.mediaKind : mediaKindForPath(next.source_path),
     }));
     setDestination((current) => ({
       selectionId: current?.path === next.destination_path ? current.selectionId : undefined,
       path: next.destination_path,
       name: fileName(next.destination_path),
     }));
-    setContext(next.extra_instructions || '');
+    const intake = intakeFromSession(next.extra_instructions || '', next.speaker_hints);
+    setContext(intake.context);
+    setSpeakers(intake.speakers);
+    setAttachments((next.attachment_paths || []).map((path) => ({ path, name: fileName(path) })));
     setExtractionOptions(next.extraction_options);
     const attempt = next.attempts.at(-1);
     if (attempt?.result) {
-      setReviewMarkdown(attempt.result.session_record_markdown);
+      if (!preserveMarkdownDraft) setReviewMarkdown(attempt.result.session_record_markdown);
       setAnalysisPreview('');
     } else if (attempt?.raw_stream) {
       setAnalysisPreview(attempt.raw_stream);
@@ -104,20 +142,6 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
-
-  useEffect(() => {
-    const activeId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
-    if (!activeId) return;
-    const controller = new AbortController();
-    getSession(activeId, controller.signal)
-      .then(applySession)
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
-        setErrorNotice(errorMessage(error, 'The saved session could not be restored.'));
-      });
-    return () => controller.abort();
-  }, []);
 
   useEffect(() => {
     if (!isProcessing) return;
@@ -131,16 +155,44 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isProcessing]);
 
+  useEffect(() => {
+    if (saveStatus !== 'saved') return;
+    const fade = window.setTimeout(() => setSaveStatus('fading'), 1800);
+    const dismiss = window.setTimeout(() => setSaveStatus('idle'), 2400);
+    return () => {
+      window.clearTimeout(fade);
+      window.clearTimeout(dismiss);
+    };
+  }, [saveStatus]);
+
+  useEffect(() => {
+    if (!errorNotice) return;
+    const dismiss = window.setTimeout(() => setErrorNotice(null), 6000);
+    return () => window.clearTimeout(dismiss);
+  }, [errorNotice]);
+
   const selectSource = async () => {
     setPickerBusy('source');
     setErrorNotice(null);
     try {
       const selected = await pickSource(source?.path);
-      setSource({ selectionId: selected.selection_id, path: selected.path, name: selected.name, mediaKind: selected.media_kind });
+      const selectedSource = { selectionId: selected.selection_id, path: selected.path, name: selected.name, mediaKind: selected.media_kind };
+      setSource(selectedSource);
       setSession(null);
       setAnalysisPreview('');
       setReviewMarkdown('');
-      window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      setContext('');
+      setSpeakers('');
+      setAttachments([]);
+      setSaveStatus('idle');
+      const savedSessionId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
+      if (!savedSessionId) return;
+      const savedSession = await getSession(savedSessionId);
+      if (savedSession.source_path === selected.path) {
+        applySession(savedSession, selectedSource);
+      } else {
+        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      }
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The source picker failed.'));
     } finally {
@@ -157,6 +209,7 @@ export default function App() {
       setSession(null);
       setAnalysisPreview('');
       setReviewMarkdown('');
+      setAttachments([]);
       window.localStorage.removeItem(ACTIVE_SESSION_KEY);
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The destination picker failed.'));
@@ -170,6 +223,10 @@ export default function App() {
     setSession(null);
     setAnalysisPreview('');
     setReviewMarkdown('');
+    setContext('');
+    setSpeakers('');
+    setAttachments([]);
+    setSaveStatus('idle');
     window.localStorage.removeItem(ACTIVE_SESSION_KEY);
   };
 
@@ -183,7 +240,6 @@ export default function App() {
       const delta = event.data;
       if (delta.raw_stream) setAnalysisPreview(delta.raw_stream);
       else setAnalysisPreview((current) => `${current}${delta.delta}`);
-      requestAnimationFrame(() => outputRef.current?.scrollIntoView({ behavior: 'smooth' }));
       return;
     }
     if (event.type === 'analysis_error') {
@@ -214,12 +270,15 @@ export default function App() {
     setReviewMarkdown('');
     setIsProcessing(true);
     setProcessTime('00:00');
+    requestAnimationFrame(() => outputRef.current?.scrollIntoView({ behavior: 'smooth' }));
     try {
       const active = session || await createSession({
         sourceSelectionId: source.selectionId!,
         destinationSelectionId: destination.selectionId!,
-        extraInstructions: [context, speakers && `Speaker hints: ${speakers}`].filter(Boolean).join('\n'),
+        extraInstructions: context,
+        speakerHints: speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean),
         extractionOptions,
+        attachmentSelectionIds: attachments.map((attachment) => attachment.selectionId).filter((id): id is string => Boolean(id)),
       });
       applySession(active);
       const controller = new AbortController();
@@ -232,6 +291,43 @@ export default function App() {
       executeAbortRef.current = null;
       setIsProcessing(false);
     }
+  };
+
+  const selectAttachments = async () => {
+    try {
+      const selected = await pickAttachments();
+      setAttachments((current) => [...current, ...selected.map((item) => ({
+        selectionId: item.selection_id, path: item.path, name: item.name,
+      }))]);
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'Attached Context could not be selected.'));
+    }
+  };
+
+  const saveReview = async (update: Parameters<typeof updateReview>[2], markdownVersion?: number) => {
+    const attempt = session?.attempts.at(-1);
+    if (!session || !attempt?.result) return;
+    pendingReviewSavesRef.current += 1;
+    setSaveStatus('saving');
+    const persist = async () => {
+      try {
+        const updated = await updateReview(session.id, attempt.id, update);
+        const hasNewerMarkdownDraft = markdownVersion !== undefined && markdownVersionRef.current !== markdownVersion;
+        applySession(updated, undefined, hasNewerMarkdownDraft);
+        if (pendingReviewSavesRef.current === 1) {
+          setSaveStatus(hasNewerMarkdownDraft ? 'idle' : 'saved');
+        }
+      } catch (error) {
+        if (pendingReviewSavesRef.current === 1) {
+          setSaveStatus('idle');
+          setErrorNotice(errorMessage(error, 'Review edits could not be saved.'));
+        }
+      } finally {
+        pendingReviewSavesRef.current -= 1;
+      }
+    };
+    reviewSaveQueueRef.current = reviewSaveQueueRef.current.then(persist, persist);
+    await reviewSaveQueueRef.current;
   };
 
   const handleAbort = () => {
@@ -270,6 +366,8 @@ export default function App() {
             pickerBusy={pickerBusy}
             context={context}
             setContext={setContext}
+            attachments={attachments}
+            onSelectAttachments={selectAttachments}
             speakers={speakers}
             setSpeakers={setSpeakers}
             extractionOptions={extractionOptions}
@@ -317,12 +415,24 @@ export default function App() {
               stage={session?.stage || 'intake'}
               progress={session?.progress || 0}
               markdownText={reviewMarkdown}
-              setMarkdownText={setReviewMarkdown}
+              setMarkdownText={(text) => {
+                markdownVersionRef.current += 1;
+                setSaveStatus('idle');
+                setReviewMarkdown(text);
+              }}
+              onSaveMarkdown={() => saveReview({ session_record_markdown: reviewMarkdown }, markdownVersionRef.current)}
+              saveStatus={saveStatus}
               onSelectSource={selectSource}
             />
           </section>
           <section className="lg:col-span-5 flex flex-col h-full overflow-hidden">
-            <InsightsPanel result={review} />
+            <InsightsPanel
+              result={review}
+              onSaveIdentity={(short_name) => saveReview({ short_name })}
+              onRenameSpeaker={(from, to) => saveReview({ speaker_renames: { [from]: to } })}
+              onReviewEdit={() => setSaveStatus('idle')}
+              saveStatus={saveStatus}
+            />
           </section>
         </div>
       </section>

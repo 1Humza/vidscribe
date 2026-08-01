@@ -22,6 +22,10 @@ import GlassModal from './GlassModal';
 
 interface InsightsPanelProps {
   result: DistillationResult | null;
+  onSaveIdentity: (shortName: string) => void;
+  onRenameSpeaker: (from: string, to: string) => void;
+  onReviewEdit: () => void;
+  saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
 }
 
 interface ReviewSnapshot {
@@ -36,7 +40,7 @@ type ResultWithSnapshots = DistillationResult & { snapshots?: ReviewSnapshot[] }
 
 const pendingActionTitle = 'This control is visible for the planned workflow and is not active yet.';
 
-export default function InsightsPanel({ result }: InsightsPanelProps) {
+export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, saveStatus }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [showSnapshotsPreview, setShowSnapshotsPreview] = useState(false);
   const [fsExpanded, setFsExpanded] = useState<Record<string, boolean>>({
@@ -148,29 +152,31 @@ export default function InsightsPanel({ result }: InsightsPanelProps) {
       <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-4">
         {result ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-12 gap-3 border-b border-muted-canvas pb-3">
-              <div className="col-span-8 md:col-span-9">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-muted-canvas pb-3">
+              <div className="min-w-0">
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1">Title</div>
                 <input
                   type="text"
-                  value={result.title}
-                  disabled
-                  readOnly
-                  title={pendingActionTitle}
-                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-xs text-main-canvas font-sans px-2.5 py-1.5 rounded focus:outline-none transition-colors disabled:cursor-not-allowed"
+                  key={`title-${result.title}`}
+                  defaultValue={result.title}
+                  onChange={onReviewEdit}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      onSaveIdentity(event.currentTarget.value);
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  aria-label="Short Name"
+                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-xs text-main-canvas font-sans px-2.5 py-1.5 rounded focus:outline-none transition-colors"
                 />
               </div>
 
-              <div className="col-span-4 md:col-span-3">
+              <div className="shrink-0">
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1">Timestamp</div>
-                <input
-                  type="text"
-                  value={result.timestamp}
-                  disabled
-                  readOnly
-                  title={pendingActionTitle}
-                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-xs text-muted-canvas font-mono px-2.5 py-1.5 rounded focus:outline-none transition-colors disabled:cursor-not-allowed"
-                />
+                <div aria-label="Timestamp" className="w-full whitespace-nowrap bg-input-canvas border border-muted-canvas text-xs text-muted-canvas font-mono px-2.5 py-1.5 rounded">
+                  {result.timestamp}
+                </div>
               </div>
             </div>
 
@@ -205,7 +211,20 @@ export default function InsightsPanel({ result }: InsightsPanelProps) {
                       <div className="w-5 h-5 flex-shrink-0 rounded bg-main-canvas text-app-canvas flex items-center justify-center font-sans font-bold text-[10px] opacity-90">
                         {speaker.initials}
                       </div>
-                      <span className="text-xs text-main-canvas truncate font-sans">{speaker.name}</span>
+                      <input
+                        key={`${speaker.id}-${speaker.name}`}
+                        defaultValue={speaker.name}
+                        onChange={onReviewEdit}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            onRenameSpeaker(speaker.name, event.currentTarget.value);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        aria-label={`Speaker Label ${speaker.name}`}
+                        className="w-full min-w-0 bg-transparent text-xs text-main-canvas truncate font-sans focus:outline-none"
+                      />
                     </div>
                     <button
                       type="button"
@@ -230,6 +249,7 @@ export default function InsightsPanel({ result }: InsightsPanelProps) {
                 </button>
               </div>
             </div>
+
 
             <div className="border-b border-muted-canvas pb-3">
               <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1.5">

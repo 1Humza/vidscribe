@@ -80,6 +80,7 @@ test.describe('real recording tracer bullet', () => {
 
     await page.getByRole('button', { name: 'Select Destination' }).click();
     await expect(page.getByText(destinationPath, { exact: false })).toBeVisible();
+    await page.getByLabel('Session Date').fill('2026-07-31');
 
     const sessionRequestPromise = page.waitForRequest(
       (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/sessions',

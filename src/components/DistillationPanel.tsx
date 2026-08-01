@@ -46,6 +46,8 @@ interface DistillationPanelProps {
   progress: number;
   markdownText: string;
   setMarkdownText: (text: string) => void;
+  onSaveMarkdown: () => void;
+  saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onSelectSource: () => void;
 }
 
@@ -58,10 +60,13 @@ export default function DistillationPanel({
   progress,
   markdownText,
   setMarkdownText,
+  onSaveMarkdown,
+  saveStatus,
   onSelectSource
 }: DistillationPanelProps) {
-  const [viewMode, setViewMode] = useState<'rich' | 'raw'>('rich');
+  const [viewMode, setViewMode] = useState<'rich' | 'raw'>('raw');
   const [copied, setCopied] = useState(false);
+  const previewForDisplay = previewText.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n');
   const stageMessage = {
     intake: 'Waiting for a Session to start.',
     preparing: 'Preparing reusable mono Analysis Audio with FFmpeg.',
@@ -314,7 +319,7 @@ export default function DistillationPanel({
               <span>Analysis preview · awaiting schema validation</span>
               <span>{Math.round((progress > 1 ? progress / 100 : progress) * 100)}%</span>
             </div>
-            <pre className="h-[calc(100%-48px)] overflow-y-auto p-4 rounded bg-input-canvas/50 border border-muted-canvas text-sm font-mono text-main-canvas whitespace-pre-wrap break-words select-text">{previewText}</pre>
+            <pre className="h-[calc(100%-48px)] overflow-y-auto p-4 rounded bg-input-canvas/50 border border-muted-canvas text-sm font-mono text-main-canvas whitespace-pre-wrap break-words select-text">{previewForDisplay}</pre>
           </div>
         ) : isProcessing && !result ? (
           /* Processing/Streaming Loader State - ultra clean, quiet styling */
@@ -368,13 +373,26 @@ export default function DistillationPanel({
                 {renderRichMarkdown(markdownText)}
               </div>
             ) : (
-              <textarea
-                aria-label="Session Record Markdown (editing pending)"
-                value={markdownText}
-                readOnly
-                title="Review editing is pending durable attempt edits"
-                className="w-full h-[65vh] lg:h-[calc(100vh-260px)] min-h-[450px] bg-input-canvas/50 text-sm font-mono text-main-canvas p-4 rounded border border-muted-canvas focus:outline-none leading-relaxed resize-none transition-colors cursor-default"
-              />
+              <div className="relative">
+                <textarea
+                  aria-label="Session Record Markdown"
+                  value={markdownText}
+                  onChange={(event) => setMarkdownText(event.target.value)}
+                  onBlur={onSaveMarkdown}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      onSaveMarkdown();
+                    }
+                  }}
+                  className="w-full h-[65vh] lg:h-[calc(100vh-260px)] min-h-[450px] bg-input-canvas/50 text-sm font-mono text-main-canvas p-4 rounded border border-muted-canvas focus:outline-none leading-relaxed resize-none transition-colors"
+                />
+                {saveStatus !== 'idle' && (
+                  <div aria-live="polite" className={`pointer-events-none absolute top-3 right-3 rounded-md px-2 py-1 text-[10px] font-mono uppercase tracking-wider transition-opacity duration-500 ${saveStatus === 'saving' ? 'bg-input-canvas/70 text-muted-canvas opacity-75' : `bg-input-canvas/60 text-muted-canvas ${saveStatus === 'fading' ? 'opacity-0' : 'opacity-65'}`}`}>
+                    {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ) : (

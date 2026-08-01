@@ -21,6 +21,7 @@ test.describe('analysis generation failure', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Select Source' }).click();
     await page.getByRole('button', { name: 'Select Destination' }).click();
+    await page.getByLabel('Session Date').fill('2026-07-31');
     const sessionRequestPromise = page.waitForRequest(
       (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/sessions',
     );
