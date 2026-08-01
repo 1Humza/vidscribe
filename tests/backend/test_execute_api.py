@@ -58,6 +58,7 @@ def create_session(client: TestClient, source: Path, destination: Path) -> str:
         json={
             "source_selection_id": selected_source["selection_id"],
             "destination_selection_id": selected_destination["selection_id"],
+            "session_date": "2026-07-31",
         },
     )
     assert response.status_code == 201
@@ -108,6 +109,11 @@ def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path)
     assert "[00:17] Speaker 1: After" in restored["transcript"]
     assert restored["attempts"][0]["status"] == "completed"
     assert "After" in restored["attempts"][0]["result"]["session_record_markdown"]
+    assert restored["transcript_word_timings"][0]["word"] == "Before"
+    assert restored["attempts"][0]["result"]["corrected_transcript_turns"] == [
+        {"speaker_label": "Speaker 1", "text": "Before", "source_word_start": 0, "source_word_end": 0},
+        {"speaker_label": "Speaker 1", "text": "After", "source_word_start": 1, "source_word_end": 1},
+    ]
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
     assert source.is_file()
 

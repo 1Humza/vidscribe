@@ -6,6 +6,7 @@ import pytest
 
 from vidscribe.analysis import AnalysisGenerationError, AnalysisInput, GeminiAnalyzer
 from vidscribe.models import AnalysisResult, ExtractionOptions
+from vidscribe.session_record import validate_session_record
 
 
 class FakeFiles:
@@ -87,3 +88,63 @@ def test_gemini_deletes_uploaded_analysis_audio_after_stream_failure(
         list(analyzer.stream(audio, analysis_input))
 
     assert client.files.deleted == ["files/analysis-audio"]
+
+
+def test_session_record_accepts_provider_section_depth_without_losing_order() -> None:
+    markdown = """📝 **Demo Sync** · 07-31-2026
+
+### Recall Brief
+
+Grounded recall.
+
+### Action Summary
+
+📝 **Demo Sync** · 07-31-2026
+
+Grounded recall.
+
+### Chapters
+
+00:00 Opening
+00:10 Review
+00:20 Close
+
+### Snapshots
+
+Source Media was audio.
+
+### Transcript
+
+[00:00] Speaker 1: Hello
+"""
+
+    validate_session_record(markdown, ExtractionOptions())
+
+
+def test_session_record_accepts_an_explicit_empty_chapters_section() -> None:
+    markdown = """📝 **Demo Sync** · 07-31-2026
+
+## Recall Brief
+
+Grounded recall.
+
+## Action Summary
+
+📝 **Demo Sync** · 07-31-2026
+
+Grounded recall.
+
+## Chapters
+
+No chapter boundaries qualify for this Session.
+
+## Snapshots
+
+Source Media was audio.
+
+## Transcript
+
+[00:00] Speaker 1: Hello
+"""
+
+    validate_session_record(markdown, ExtractionOptions())

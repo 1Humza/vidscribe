@@ -32,6 +32,8 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
                 "source_selection_id": source_selection["selection_id"],
                 "destination_selection_id": destination_selection["selection_id"],
                 "extra_instructions": "Preserve product names.",
+                "speaker_hints": ["Alex", "Sam"],
+                "session_date": "2026-07-31",
                 "extraction_options": {
                     "action_summary": True,
                     "topics": False,
@@ -55,6 +57,7 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
         "source_path": str(source.resolve()),
         "destination_path": str(destination.resolve()),
         "extra_instructions": "Preserve product names.",
+        "speaker_hints": ["Alex", "Sam"],
         "extraction_options": {
             "action_summary": True,
             "topics": False,
@@ -63,6 +66,9 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
         },
         "analysis_audio_path": None,
         "transcript": None,
+        "session_date": "2026-07-31",
+        "attachment_paths": [],
+        "transcript_word_timings": [],
         "attempts": [],
         "created_at": restored.json()["created_at"],
         "updated_at": restored.json()["updated_at"],

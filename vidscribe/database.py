@@ -1,12 +1,12 @@
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
 
-from vidscribe.models import ResolvedSessionIntake, SessionView
+from vidscribe.models import AnalysisResult, ResolvedSessionIntake, SessionView
 
 
 class SessionRepository:
@@ -39,9 +39,13 @@ class SessionRepository:
                     source_path TEXT NOT NULL,
                     destination_path TEXT NOT NULL,
                     extra_instructions TEXT NOT NULL,
+                    speaker_hints TEXT NOT NULL DEFAULT '[]',
                     extraction_options TEXT NOT NULL,
                     analysis_audio_path TEXT,
                     transcript TEXT,
+                    session_date TEXT,
+                    attachment_paths TEXT NOT NULL DEFAULT '[]',
+                    transcript_word_timings TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -59,6 +63,23 @@ class SessionRepository:
                 );
                 """
             )
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(sessions)")
+            }
+            if "session_date" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN session_date TEXT")
+            if "attachment_paths" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN attachment_paths TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "speaker_hints" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN speaker_hints TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "transcript_word_timings" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN transcript_word_timings TEXT NOT NULL DEFAULT '[]'"
+                )
 
     def create(self, request: ResolvedSessionIntake) -> SessionView:
         session_id = str(uuid4())
@@ -68,15 +89,18 @@ class SessionRepository:
                 """
                 INSERT INTO sessions (
                     id, status, stage, progress, source_path, destination_path,
-                    extra_instructions, extraction_options, created_at, updated_at
-                ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?)
+                    extra_instructions, speaker_hints, extraction_options, session_date, attachment_paths, created_at, updated_at
+                ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
                     str(Path(request.source_path).resolve()),
                     str(Path(request.destination_path).resolve()),
                     request.extra_instructions,
+                    json.dumps(request.speaker_hints),
                     request.extraction_options.model_dump_json(),
+                    request.session_date.isoformat(),
+                    json.dumps(request.attachment_paths),
                     now,
                     now,
                 ),
@@ -96,6 +120,9 @@ class SessionRepository:
             ).fetchall()
         payload = dict(row)
         payload["extraction_options"] = json.loads(payload["extraction_options"])
+        payload["speaker_hints"] = json.loads(payload["speaker_hints"])
+        payload["attachment_paths"] = json.loads(payload["attachment_paths"])
+        payload["transcript_word_timings"] = json.loads(payload["transcript_word_timings"])
         payload["attempts"] = [
             {
                 **dict(attempt),
@@ -112,12 +139,15 @@ class SessionRepository:
             "progress",
             "analysis_audio_path",
             "transcript",
+            "transcript_word_timings",
         }
         unexpected = set(changes) - allowed
         if unexpected:
             raise ValueError(f"Unsupported Session fields: {sorted(unexpected)}")
         if not changes:
             return self.get(session_id)
+        if "transcript_word_timings" in changes:
+            changes["transcript_word_timings"] = json.dumps(changes["transcript_word_timings"])
         changes["updated_at"] = datetime.now(UTC).isoformat()
         assignments = ", ".join(f"{field} = ?" for field in changes)
         with self.connection() as connection:
@@ -164,6 +194,36 @@ class SessionRepository:
                 """,
                 (result_json, datetime.now(UTC).isoformat(), attempt_id),
             )
+
+    def update_attempt_result(
+        self,
+        session_id: str,
+        attempt_id: str,
+        result: AnalysisResult,
+        session_date: date | None = None,
+    ) -> SessionView:
+        with self.connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE analysis_attempts
+                SET result = ?, updated_at = ?
+                WHERE id = ? AND session_id = ? AND status = 'completed'
+                """,
+                (
+                    result.model_dump_json(),
+                    datetime.now(UTC).isoformat(),
+                    attempt_id,
+                    session_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(attempt_id)
+            if session_date is not None:
+                connection.execute(
+                    "UPDATE sessions SET session_date = ?, updated_at = ? WHERE id = ?",
+                    (session_date.isoformat(), datetime.now(UTC).isoformat(), session_id),
+                )
+        return self.get(session_id)
 
     def fail_attempt(self, attempt_id: str, message: str) -> None:
         with self.connection() as connection:

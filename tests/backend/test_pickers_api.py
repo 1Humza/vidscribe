@@ -37,6 +37,7 @@ def test_service_owned_picker_capabilities_are_required_for_session_paths(
             json={
                 "source_selection_id": selected_source.json()["selection_id"],
                 "destination_selection_id": selected_destination.json()["selection_id"],
+                "session_date": "2026-07-31",
             },
         )
         forged = client.post(

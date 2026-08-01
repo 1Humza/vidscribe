@@ -3,10 +3,12 @@ import type {
   AnalysisErrorDto,
   CreateSessionRequestDto,
   DestinationPickerSelectionDto,
+  AttachmentPickerSelectionDto,
   ExtractionOptionsDto,
   PipelineErrorDto,
   SessionViewDto,
   SourcePickerSelectionDto,
+  ReviewUpdateDto,
 } from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -43,19 +45,41 @@ export function pickDestination(initialPath?: string): Promise<DestinationPicker
   return postJson('/api/pickers/destination', initialPath ? { initial_path: initialPath } : {});
 }
 
+export function pickAttachments(initialPath?: string): Promise<AttachmentPickerSelectionDto[]> {
+  return postJson('/api/pickers/attachments', initialPath ? { initial_path: initialPath } : {});
+}
+
 export function createSession(input: {
   sourceSelectionId: string;
   destinationSelectionId: string;
   extraInstructions: string;
+  speakerHints?: string[];
   extractionOptions: ExtractionOptionsDto;
+  sessionDate?: string;
+  attachmentSelectionIds?: string[];
 }): Promise<SessionViewDto> {
   const request: CreateSessionRequestDto = {
     source_selection_id: input.sourceSelectionId,
     destination_selection_id: input.destinationSelectionId,
     extra_instructions: input.extraInstructions || undefined,
+    speaker_hints: input.speakerHints?.length ? input.speakerHints : undefined,
     extraction_options: input.extractionOptions,
+    session_date: input.sessionDate || undefined,
+    attachment_selection_ids: input.attachmentSelectionIds?.length ? input.attachmentSelectionIds : undefined,
   };
   return postJson('/api/sessions', request);
+}
+
+export function updateReview(
+  sessionId: string,
+  attemptId: string,
+  update: ReviewUpdateDto,
+): Promise<SessionViewDto> {
+  return requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/review`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
 }
 
 export function getSession(id: string, signal?: AbortSignal): Promise<SessionViewDto> {

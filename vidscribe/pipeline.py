@@ -9,7 +9,35 @@ from vidscribe.analysis import AnalysisInput, Analyzer
 from vidscribe.database import SessionRepository
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import AnalysisResult, SessionView
+from vidscribe.session_record import validate_session_record
 from vidscribe.transcription import TranscriptFormatter, Transcriber
+
+
+def _read_attached_context(paths: list[str]) -> list[tuple[str, str]]:
+    context: list[tuple[str, str]] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")[:100_000]
+        except OSError:
+            continue
+        context.append((path.name, content))
+    return context
+
+
+def _with_input_context(
+    markdown: str, extra_instructions: str, attachment_paths: list[str], consulted: list[str]
+) -> str:
+    if not extra_instructions and not attachment_paths:
+        return markdown
+    allowed = {Path(path).name for path in attachment_paths}
+    consulted_names = [name for name in consulted if name in allowed]
+    lines = ["## Input Context", ""]
+    if extra_instructions:
+        lines.extend(["### Extra Instructions", "", extra_instructions, ""])
+    if consulted_names:
+        lines.extend(["### Attached Context", "", *[f"- {name}" for name in consulted_names], ""])
+    return "\n".join(lines) + markdown
 
 
 class SessionPipeline:
@@ -56,7 +84,10 @@ class SessionPipeline:
                 transcription = self.transcriber.transcribe(prepared)
                 transcript = TranscriptFormatter().format(transcription)
                 session = self.repository.update_session(
-                    session_id, transcript=transcript, progress=65
+                    session_id,
+                    transcript=transcript,
+                    transcript_word_timings=[word.model_dump() for word in transcription.words],
+                    progress=65,
                 )
             assert session.transcript is not None
 
@@ -65,8 +96,18 @@ class SessionPipeline:
             )
             analysis_input = AnalysisInput(
                 transcript=session.transcript,
-                extra_instructions=session.extra_instructions,
+                extra_instructions="\n".join(
+                    part
+                    for part in (
+                        session.extra_instructions,
+                        f"Speaker hints: {', '.join(session.speaker_hints)}" if session.speaker_hints else "",
+                    )
+                    if part
+                ),
                 extraction_options=session.extraction_options,
+                session_date=session.session_date.isoformat(),
+                attached_context=_read_attached_context(session.attachment_paths),
+                canonical_word_count=len(session.transcript_word_timings),
             )
             stream = iter(self.analyzer.stream(prepared, analysis_input))
             raw_stream = ""
@@ -87,6 +128,18 @@ class SessionPipeline:
                     },
                 )
             result = AnalysisResult.model_validate_json(raw_stream)
+            if any(
+                turn.source_word_end >= len(session.transcript_word_timings)
+                for turn in result.corrected_transcript_turns
+            ):
+                raise ValueError("Corrected Transcript turn exceeds canonical Whisper word range")
+            result.session_record_markdown = _with_input_context(
+                result.session_record_markdown,
+                session.extra_instructions,
+                session.attachment_paths,
+                result.consulted_attachment_filenames,
+            )
+            validate_session_record(result.session_record_markdown, session.extraction_options)
             self.repository.complete_attempt(attempt_id, result.model_dump_json())
             completed = self.repository.update_session(
                 session_id, status="review", stage="review", progress=100

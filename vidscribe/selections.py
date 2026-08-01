@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 
-SelectionKind = Literal["source", "destination"]
+SelectionKind = Literal["source", "destination", "attachment"]
 
 
 class SelectionRegistry:
@@ -20,4 +20,3 @@ class SelectionRegistry:
         if selected is None or selected[0] != kind:
             raise KeyError(selection_id)
         return selected[1]
-

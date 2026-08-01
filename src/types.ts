@@ -35,9 +35,12 @@ export interface SessionViewDto {
   source_path: string;
   destination_path: string;
   extra_instructions: string;
+  speaker_hints: string[];
   extraction_options: ExtractionOptionsDto;
   analysis_audio_path: string | null;
   transcript: string | null;
+  session_date: string;
+  attachment_paths: string[];
   attempts: AnalysisAttemptDto[];
   created_at: string;
   updated_at: string;
@@ -56,11 +59,33 @@ export interface DestinationPickerSelectionDto {
   name: string;
 }
 
+export interface AttachmentPickerSelectionDto {
+  selection_id: string;
+  path: string;
+  name: string;
+}
+
+export interface SelectedAttachment {
+  selectionId?: string;
+  path: string;
+  name: string;
+}
+
 export interface CreateSessionRequestDto {
   source_selection_id: string;
   destination_selection_id: string;
   extra_instructions?: string;
+  speaker_hints?: string[];
   extraction_options: ExtractionOptionsDto;
+  session_date?: string;
+  attachment_selection_ids?: string[];
+}
+
+export interface ReviewUpdateDto {
+  session_record_markdown?: string;
+  session_date?: string;
+  short_name?: string;
+  speaker_renames?: Record<string, string>;
 }
 
 export interface AnalysisDeltaDto {

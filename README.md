@@ -34,6 +34,11 @@ Groq direct-upload ceiling is split into temporary overlapping FFmpeg windows,
 fully transcribed with absolute timing and deterministic overlap deduplication,
 then removed automatically.
 
+Session Date is inferred from an explicit filename date or recording metadata;
+when neither is reliable, the user must confirm it before processing. Attached
+Context uses the same picker-capability boundary, remains in its original
+location, and is supplied to analysis as bounded local context.
+
 ## Tests
 
 ```bash
