@@ -39,6 +39,24 @@ afterEach(() => {
 });
 
 describe('issue 2 session UI', () => {
+  it('preserves the original two-stage intake and distillation workspace', () => {
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: 'Speech Distiller' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Distillation Workspace' })).toBeInTheDocument();
+    expect(screen.getByText('Quiet Distillation Center')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Document' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Insights & Assets' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Attach reference files' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Snapshots' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Engineering Sync: Database Migration sample preset (pending)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Product Design: Mobile App Redesign sample preset (pending)' })).toBeDisabled();
+  });
+
   it('uses opaque picker selections, previews raw streaming, then promotes a validated result', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
@@ -56,15 +74,20 @@ describe('issue 2 session UI', () => {
 
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Snapshots' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Snapshots' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
-    await screen.findByText('/recordings/team-sync.mp4');
+    await screen.findByText('team-sync.mp4');
     await user.click(screen.getByRole('button', { name: 'Select Destination' }));
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     const review = await screen.findByRole('region', { name: 'Final Review' });
     expect(review).toHaveTextContent('(Silence 00:16)');
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview Snapshots (pending)' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'RAW' }));
+    expect(screen.getByRole('textbox', { name: 'Session Record Markdown (editing pending)' })).toHaveAttribute('readonly');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vidscribe.activeSessionId')).toBe('session-1');
     const createRequest = fetchMock.mock.calls[2][1] as RequestInit;
@@ -72,6 +95,31 @@ describe('issue 2 session UI', () => {
       source_selection_id: 'source-token',
       destination_selection_id: 'destination-token',
     });
+  });
+
+  it('keeps cancellation visible but pending until durable cancellation exists', async () => {
+    let finishStream: (() => void) | undefined;
+    const openStream = new Response(new ReadableStream({
+      start(controller) {
+        finishStream = () => controller.close();
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
+      .mockImplementationOnce(() => json(session, 201))
+      .mockImplementationOnce(() => Promise.resolve(openStream));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Select Source' }));
+    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
+    await user.click(screen.getByRole('button', { name: 'Execute' }));
+
+    expect(await screen.findByRole('button', { name: 'Abort · Pending' })).toBeDisabled();
+    finishStream?.();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Execute' })).toBeEnabled());
   });
 
   it('hydrates only a schema-validated completed result as Final Review', async () => {
@@ -92,6 +140,7 @@ describe('issue 2 session UI', () => {
     render(<App />);
 
     expect(await screen.findByRole('region', { name: 'Final Review' })).toHaveTextContent('Restored review');
+    expect(screen.getByText(/video • size pending • duration pending • date pending/i)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
   });
 
@@ -106,7 +155,7 @@ describe('issue 2 session UI', () => {
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText('/recordings/team-sync.mp4');
+    await screen.findByText('team-sync.mp4');
 
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 

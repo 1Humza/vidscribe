@@ -70,7 +70,12 @@ test.describe('real recording tracer bullet', () => {
     await expect(page.getByRole('heading', { name: 'Final Review' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Analysis Preview' })).toHaveCount(0);
 
+    const sourcePickerRequestPromise = page.waitForRequest(
+      (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/pickers/source',
+    );
     await page.getByRole('button', { name: 'Select Source' }).click();
+    const sourcePickerRequest = await sourcePickerRequestPromise;
+    expect(new URL(sourcePickerRequest.url()).origin).toBe('http://127.0.0.1:5173');
     await expect(page.getByText('source.wav', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Select Destination' }).click();
