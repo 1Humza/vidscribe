@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   AlertTriangle,
   ChevronDown,
@@ -25,6 +26,9 @@ interface InsightsPanelProps {
   onSaveIdentity: (shortName: string) => void;
   onRenameSpeaker: (from: string, to: string) => void;
   onReviewEdit: () => void;
+  onSnapshotKeep: (filename: string, kept: boolean) => void;
+  onMentionCorrect: (ranges: Array<{ sourceWordStart: number; sourceWordEnd: number }>, replacement: string) => void;
+  onMentionSelect: (phrase: string | null) => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onCommit: () => void;
   canCommit: boolean;
@@ -32,27 +36,60 @@ interface InsightsPanelProps {
   isReadOnly: boolean;
 }
 
-interface ReviewSnapshot {
-  time: string;
-  name: string;
-  description?: string;
-  imageUrl?: string;
-  excluded?: boolean;
-}
-
-type ResultWithSnapshots = DistillationResult & { snapshots?: ReviewSnapshot[] };
+type ReviewSnapshot = NonNullable<DistillationResult['snapshots']>[number];
 
 const pendingActionTitle = 'This control is visible for the planned workflow and is not active yet.';
 
-export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
+function canonicalWord(value: string): string {
+  return value
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+    .toLocaleLowerCase();
+}
+
+function SnapshotEvidence({ cuePhrase, anchorWord }: Pick<ReviewSnapshot, 'cuePhrase' | 'anchorWord'>) {
+  if (!cuePhrase) return null;
+  const anchor = canonicalWord(anchorWord);
+  return (
+    <span aria-label="Snapshot evidence" className="text-sm text-muted-canvas leading-relaxed">
+      {cuePhrase.split(/(\s+)/).map((fragment, index) => (
+        canonicalWord(fragment) === anchor && anchor
+          ? <strong key={index} className="font-bold text-main-canvas">{fragment}</strong>
+          : fragment
+      ))}
+    </span>
+  );
+}
+
+export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
-  const [showSnapshotsPreview, setShowSnapshotsPreview] = useState(false);
+  const [activeSnapshotFilename, setActiveSnapshotFilename] = useState<string | null>(null);
+  const [editingMention, setEditingMention] = useState<string | null>(null);
+  const [hoveredMention, setHoveredMention] = useState<string | null>(null);
   const [fsExpanded, setFsExpanded] = useState<Record<string, boolean>>({
     root: true,
     assets: true,
   });
 
-  const snapshots = (result as ResultWithSnapshots | null)?.snapshots ?? [];
+  const snapshots = result?.snapshots ?? [];
+  const keptSnapshotCount = snapshots.filter((snapshot) => snapshot.kept).length;
+  const activeSnapshot = snapshots.find((snapshot) => snapshot.filename === activeSnapshotFilename) ?? null;
+  const activeSnapshotIndex = activeSnapshotFilename
+    ? snapshots.findIndex((snapshot) => snapshot.filename === activeSnapshotFilename)
+    : -1;
+
+  useEffect(() => {
+    if (activeSnapshotIndex === -1 || snapshots.length < 2) return;
+    const cycleSnapshot = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const direction = event.key === 'ArrowRight' ? 1 : -1;
+      const nextIndex = (activeSnapshotIndex + direction + snapshots.length) % snapshots.length;
+      setActiveSnapshotFilename(snapshots[nextIndex].filename);
+    };
+    window.addEventListener('keydown', cycleSnapshot);
+    return () => window.removeEventListener('keydown', cycleSnapshot);
+  }, [activeSnapshotIndex, snapshots]);
 
   const toggleFsExpanded = (key: string) => {
     setFsExpanded((current) => ({
@@ -145,10 +182,10 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
               type="button"
               onClick={onCommit}
               disabled={!canCommit || isCommitPending}
-              title={isReadOnly ? 'This Session has been committed and is readonly.' : undefined}
+              title={isReadOnly ? 'Session commit is in progress.' : undefined}
               className={`px-4 py-1.5 bg-main-canvas text-app-canvas accent-button font-sans font-bold text-xs tracking-wider uppercase rounded transition-all shadow-sm ${canCommit && !isCommitPending ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             >
-              {isCommitPending ? 'Committing…' : isReadOnly ? 'Completed' : 'Commit'}
+              {isCommitPending || isReadOnly ? 'Committing…' : 'Commit'}
             </button>
           </div>
         )}
@@ -159,7 +196,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
           <div className="space-y-4">
             <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-muted-canvas pb-3">
               <div className="min-w-0">
-                <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1">Title</div>
+                <div className="text-xs font-bold text-muted-canvas uppercase tracking-wider mb-1">Title</div>
                 <input
                   type="text"
                   key={`title-${result.title}`}
@@ -174,13 +211,13 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
                     }
                   }}
                   aria-label="Short Name"
-                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-xs text-main-canvas font-sans px-2.5 py-1.5 rounded focus:outline-none transition-colors"
+                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-sm text-main-canvas font-sans px-2.5 py-1.5 rounded focus:outline-none transition-colors"
                 />
               </div>
 
               <div className="shrink-0">
-                <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1">Timestamp</div>
-                <div aria-label="Timestamp" className="w-full whitespace-nowrap bg-input-canvas border border-muted-canvas text-xs text-muted-canvas font-mono px-2.5 py-1.5 rounded">
+                <div className="text-xs font-bold text-muted-canvas uppercase tracking-wider mb-1">Timestamp</div>
+                <div aria-label="Timestamp" className="w-full whitespace-nowrap bg-input-canvas border border-muted-canvas text-sm text-muted-canvas font-mono px-2.5 py-1.5 rounded">
                   {result.timestamp}
                 </div>
               </div>
@@ -265,21 +302,60 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
 
               <div className="flex flex-wrap gap-1">
                 {result.mentions.map((mention) => (
-                  <span
-                    key={mention.id}
-                    className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-input-canvas border border-muted-canvas text-xs text-main-canvas"
-                  >
-                    <span>{mention.tag}</span>
-                    <button
-                      type="button"
-                      disabled
-                      title={pendingActionTitle}
-                      aria-label={`Remove ${mention.tag} (pending)`}
-                      className="text-muted-canvas opacity-50 cursor-not-allowed"
+                  editingMention === mention.id ? (
+                    <input
+                      key={mention.id}
+                      autoFocus
+                      aria-label={`Correct ${mention.tag}`}
+                      defaultValue={mention.tag}
+                      onBlur={() => {
+                        setEditingMention(null);
+                        onMentionSelect(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && event.currentTarget.value.trim()) {
+                          onMentionCorrect(mention.sourceRanges, event.currentTarget.value.trim());
+                          setEditingMention(null);
+                          onMentionSelect(null);
+                        }
+                        if (event.key === 'Escape') {
+                          setEditingMention(null);
+                          onMentionSelect(null);
+                        }
+                      }}
+                      className="w-36 px-2 py-0.5 rounded bg-input-canvas border border-orange-500 text-xs text-main-canvas focus:outline-none"
+                    />
+                  ) : (
+                    <div
+                      key={mention.id}
+                      className="relative"
+                      onMouseEnter={() => setHoveredMention(mention.id)}
+                      onMouseLeave={() => setHoveredMention(null)}
+                      onFocus={() => setHoveredMention(mention.id)}
+                      onBlur={() => setHoveredMention(null)}
                     >
-                      <X size={10} />
-                    </button>
-                  </span>
+                      <button
+                        type="button"
+                        disabled={isReadOnly}
+                        onClick={() => {
+                          onMentionSelect(mention.tag);
+                          setEditingMention(mention.id);
+                        }}
+                        className="inline-flex items-center px-2 py-0.5 rounded bg-input-canvas border border-muted-canvas text-xs text-main-canvas hover:border-orange-500 disabled:opacity-50"
+                      >
+                        {mention.tag}
+                      </button>
+                      {hoveredMention === mention.id && (
+                        <div
+                          role="tooltip"
+                          className="pointer-events-none absolute z-20 bottom-full left-0 mb-1.5 w-64 rounded border border-muted-canvas bg-panel-canvas px-2.5 py-2 text-left shadow-lg"
+                        >
+                          <div className="mb-1 font-mono text-[9px] font-bold uppercase tracking-wider text-orange-500">{mention.time} — {mention.speakerLabel}</div>
+                          <p className="text-[11px] leading-relaxed text-main-canvas">{mention.context}</p>
+                        </div>
+                      )}
+                    </div>
+                  )
                 ))}
 
                 <button
@@ -299,59 +375,58 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider">Snapshots</div>
                 <button
                   type="button"
-                  onClick={() => setShowSnapshotsPreview(true)}
-                  aria-label="Preview Snapshots (pending)"
-                  title="Snapshot extraction and curation are pending implementation"
+                  onClick={() => setActiveSnapshotFilename(snapshots.find((snapshot) => snapshot.kept)?.filename || snapshots[0]?.filename || null)}
+                  aria-label="Preview Snapshots"
+                  title="Preview proposed Snapshots"
                   className="text-[10px] text-orange-500 hover:underline font-bold uppercase tracking-wider cursor-pointer"
                 >
-                  Preview · Pending ({snapshots.filter((snapshot) => !snapshot.excluded).length}/{snapshots.length})
+                  Preview ({keptSnapshotCount}/{snapshots.length})
                 </button>
               </div>
 
               {snapshots.length > 0 ? (
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   {snapshots.map((snapshot, index) => (
-                    <button
-                      key={`${snapshot.time}-${snapshot.name}-${index}`}
-                      type="button"
-                      onClick={() => setShowSnapshotsPreview(true)}
-                      className={`group relative rounded border transition-all duration-200 overflow-hidden cursor-pointer text-left ${
-                        snapshot.excluded
-                          ? 'border-rose-500/20 bg-rose-500/5 opacity-50'
-                          : 'border-muted-canvas bg-input-canvas/30 hover:border-active-canvas'
-                      }`}
+                    <motion.div
+                      key={`${snapshot.time}-${snapshot.filename}-${index}`}
+                      layout
+                      initial={false}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className={`group relative aspect-[16/10] rounded border transition-[border-color,box-shadow] duration-200 overflow-hidden cursor-pointer text-left ${!snapshot.kept ? 'border-muted-canvas bg-input-canvas/30' : 'border-muted-canvas bg-input-canvas/30 hover:border-active-canvas'}`}
                     >
+                      <button type="button" onClick={() => setActiveSnapshotFilename(snapshot.filename)} className="absolute inset-0 w-full text-left">
                       {snapshot.imageUrl ? (
-                        <div className="relative h-16 overflow-hidden bg-input-canvas flex items-center justify-center">
+                        <div className="absolute inset-0 overflow-hidden bg-input-canvas">
                           <img
                             src={snapshot.imageUrl}
-                            alt={snapshot.name}
+                            alt={snapshot.filename}
                             referrerPolicy="no-referrer"
-                            className={`w-full h-full object-cover transition-transform duration-200 group-hover:scale-102 ${
-                              snapshot.excluded ? 'grayscale blur-[1px]' : ''
-                            }`}
+                            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-102"
                           />
-                          <div className="absolute bottom-1 left-1 px-1 py-0.5 bg-black/75 rounded font-mono text-[9px] text-white">
-                            {snapshot.time}
-                          </div>
-                          {snapshot.excluded && (
-                            <div className="absolute inset-0 bg-rose-500/15 flex items-center justify-center">
-                              <span className="text-[8px] font-mono font-bold bg-rose-600 text-white px-1 py-0.5 rounded tracking-widest">DENIED</span>
-                            </div>
-                          )}
                         </div>
                       ) : (
-                        <div className="h-16 flex flex-col items-center justify-center text-muted-canvas">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-canvas">
                           <Image size={14} />
-                          <span className="text-[9px] font-mono mt-0.5">{snapshot.time}</span>
                         </div>
                       )}
-                      <div className="p-1 px-1.5">
-                        <div className={`text-[11px] font-sans truncate ${snapshot.excluded ? 'line-through text-muted-canvas/60' : 'text-main-canvas font-medium'}`}>
-                          {snapshot.name}
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2.5 pb-2 pt-7 text-white">
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-white/80">
+                          <span>{snapshot.time}</span>
+                          {snapshot.kind === 'overview' && <span className="rounded bg-white/15 px-1 uppercase">Overview</span>}
                         </div>
+                        <div className={`truncate text-sm font-medium ${!snapshot.kept ? 'line-through text-white/60' : ''}`}>{snapshot.subject}</div>
                       </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isReadOnly}
+                        onClick={() => onSnapshotKeep(snapshot.filename, !snapshot.kept)}
+                        aria-label={`${snapshot.kept ? 'Remove' : 'Keep'} ${snapshot.filename}`}
+                        className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white/80 hover:bg-black/80 hover:text-white disabled:cursor-not-allowed"
+                      >
+                        {snapshot.kept ? <X size={13} /> : <Plus size={13} />}
+                      </button>
+                    </motion.div>
                   ))}
                 </div>
               ) : (
@@ -435,94 +510,57 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
       </GlassModal>
 
       <GlassModal
-        isOpen={showSnapshotsPreview}
-        onClose={() => setShowSnapshotsPreview(false)}
-        title="Snapshots Curation Feed"
+        isOpen={activeSnapshot !== null}
+        onClose={() => setActiveSnapshotFilename(null)}
+        title="Snapshots"
         size="full"
+        minimal
       >
-        <div className="space-y-4">
-          <div className="p-3 bg-panel-canvas border border-muted-canvas rounded-xl flex items-center justify-between text-xs font-sans">
-            <div>
-              <span className="font-bold text-main-canvas">Curation Flow:</span> Snapshot decisions will be available when capture curation is connected.
-            </div>
-            <div className="font-mono bg-input-canvas px-2.5 py-1 rounded border border-muted-canvas/60 text-main-canvas text-[11px] whitespace-nowrap">
-              {snapshots.filter((snapshot) => !snapshot.excluded).length} / {snapshots.length} Active
+        {activeSnapshot && (
+          <div className="flex max-h-[90vh] max-w-full flex-col items-center justify-center">
+            <div className="inline-flex max-w-full flex-col overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas shadow-2xl">
+              {activeSnapshot.imageUrl ? (
+                <img
+                  src={activeSnapshot.imageUrl}
+                  alt={activeSnapshot.filename}
+                  referrerPolicy="no-referrer"
+                  className="block max-h-[78vh] max-w-[96vw] object-contain"
+                />
+              ) : (
+                <div className="flex h-64 w-[min(70vw,48rem)] flex-col items-center justify-center bg-input-canvas text-muted-canvas">
+                  <Image size={48} />
+                  <span className="mt-2 text-sm font-mono">No Image Capture</span>
+                </div>
+              )}
+              <div className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-t border-muted-canvas px-5 py-3.5 ${!activeSnapshot.kept ? 'bg-input-canvas/85' : 'bg-panel-canvas'}`}>
+                <div className="flex min-w-0 items-center gap-2 justify-self-start">
+                  <h4 className={`truncate font-sans text-base font-bold text-main-canvas ${!activeSnapshot.kept ? 'line-through text-muted-canvas/70' : ''}`}>{activeSnapshot.subject}</h4>
+                  {!activeSnapshot.kept && <span className="rounded-full border border-rose-500/35 bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-rose-500">Denied</span>}
+                </div>
+                <div className="flex min-w-0 flex-wrap items-baseline justify-center gap-x-2 gap-y-1 text-center text-sm text-muted-canvas">
+                  <span className="font-mono">{activeSnapshot.time}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono">{activeSnapshot.speakerLabel}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>“<SnapshotEvidence cuePhrase={activeSnapshot.cuePhrase} anchorWord={activeSnapshot.anchorWord} />”</span>
+                  {activeSnapshot.kind === 'overview' && <span className="rounded border border-muted-canvas px-1.5 py-0.5 text-xs font-mono uppercase">Overview</span>}
+                </div>
+                <div className="justify-self-end flex items-center gap-2">
+                  <span aria-label={`Snapshot ${activeSnapshotIndex + 1} of ${snapshots.length}`} className="shrink-0 font-mono text-[11px] text-muted-canvas">{activeSnapshotIndex + 1} / {snapshots.length}</span>
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => onSnapshotKeep(activeSnapshot.filename, !activeSnapshot.kept)}
+                    aria-label={`${activeSnapshot.kept ? 'Remove' : 'Keep'} ${activeSnapshot.filename}`}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-muted-canvas text-muted-canvas transition-all hover:bg-input-canvas hover:text-main-canvas disabled:cursor-not-allowed"
+                  >
+                    {!activeSnapshot.kept ? <Plus size={16} /> : <X size={16} />}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-
-          {snapshots.length > 0 ? (
-            <div className="grid grid-cols-1 gap-8 max-h-[78vh] overflow-y-auto pr-1">
-              {snapshots.map((snapshot, index) => (
-                <div
-                  key={`${snapshot.time}-${snapshot.name}-${index}`}
-                  className={`flex flex-col rounded-2xl border transition-all duration-300 shadow-lg bg-panel-canvas overflow-hidden ${
-                    snapshot.excluded
-                      ? 'border-rose-500/20'
-                      : 'border-muted-canvas hover:border-active-canvas hover:shadow-xl'
-                  }`}
-                >
-                  <div className="p-4 flex items-center justify-between gap-4 border-b border-muted-canvas/60">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="bg-black/70 border border-muted-canvas/20 px-2 py-0.5 rounded font-mono text-[11px] font-semibold text-white">
-                          {snapshot.time}
-                        </span>
-                        <h4 className={`font-sans font-bold text-main-canvas text-base leading-none truncate ${snapshot.excluded ? 'line-through text-muted-canvas/60' : ''}`} title={snapshot.name}>
-                          {snapshot.name}
-                        </h4>
-                        {snapshot.excluded && (
-                          <span className="bg-rose-500/10 border border-rose-500/20 text-rose-500 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider">
-                            Excluded
-                          </span>
-                        )}
-                      </div>
-                      {snapshot.description && (
-                        <p className={`font-sans text-xs text-muted-canvas leading-relaxed ${snapshot.excluded ? 'italic text-muted-canvas/50' : ''}`}>
-                          {snapshot.description}
-                        </p>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled
-                      title={pendingActionTitle}
-                      aria-label={`${snapshot.excluded ? 'Restore' : 'Exclude'} ${snapshot.name} (pending)`}
-                      className={`p-2 rounded-full border transition-all duration-200 cursor-not-allowed flex-shrink-0 opacity-50 ${
-                        snapshot.excluded
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                          : 'bg-rose-500/10 border-rose-500/20 text-rose-500'
-                      }`}
-                    >
-                      {snapshot.excluded ? <Plus size={16} className="stroke-[2.5]" /> : <X size={16} className="stroke-[2.5]" />}
-                    </button>
-                  </div>
-
-                  <div className={`relative w-full overflow-hidden bg-black/40 ${snapshot.excluded ? 'grayscale opacity-40 blur-[1px]' : ''}`}>
-                    {snapshot.imageUrl ? (
-                      <img
-                        src={snapshot.imageUrl}
-                        alt={snapshot.name}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-auto max-h-[85vh] object-contain mx-auto block"
-                      />
-                    ) : (
-                      <div className="w-full h-64 flex flex-col items-center justify-center text-muted-canvas">
-                        <Image size={48} />
-                        <span className="text-sm font-mono mt-2">No Image Capture</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="h-64 flex flex-col items-center justify-center rounded-2xl border border-dashed border-muted-canvas bg-input-canvas/20 text-muted-canvas">
-              <Image size={48} />
-              <span className="text-sm font-mono mt-2 uppercase">Snapshot capture pending</span>
-            </div>
-          )}
-        </div>
+        )}
       </GlassModal>
     </div>
   );

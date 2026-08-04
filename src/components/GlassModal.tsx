@@ -13,6 +13,7 @@ interface GlassModalProps {
   title: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | 'full';
+  minimal?: boolean;
 }
 
 const sizeClasses = {
@@ -29,7 +30,7 @@ const sizeClasses = {
   'full': 'max-w-[96vw]'
 };
 
-export default function GlassModal({ isOpen, onClose, title, children, size = 'lg' }: GlassModalProps) {
+export default function GlassModal({ isOpen, onClose, title, children, size = 'lg', minimal = false }: GlassModalProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -49,21 +50,22 @@ export default function GlassModal({ isOpen, onClose, title, children, size = 'l
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-            className={`relative w-full ${sizeClasses[size]} overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas p-5 z-10 shadow-xl`}
+            className={`relative w-full ${sizeClasses[size]} z-10 ${minimal ? '' : 'overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas p-5 shadow-xl'}`}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-muted-canvas pb-3 mb-3">
-              <h3 className="font-sans font-semibold text-sm text-main-canvas tracking-tight">{title}</h3>
-              <button
-                onClick={onClose}
-                className="p-1.5 rounded-md hover:bg-input-canvas text-muted-canvas hover:text-main-canvas transition-colors"
-              >
-                <X size={15} />
-              </button>
-            </div>
+            {!minimal && (
+              <div className="flex items-center justify-between border-b border-muted-canvas pb-3 mb-3">
+                <h3 className="font-sans font-semibold text-sm text-main-canvas tracking-tight">{title}</h3>
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-md hover:bg-input-canvas text-muted-canvas hover:text-main-canvas transition-colors"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
 
             {/* Body */}
-            <div className="text-muted-canvas text-xs font-sans">
+            <div className={minimal ? '' : 'text-muted-canvas text-xs font-sans'}>
               {children}
             </div>
           </motion.div>

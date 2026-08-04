@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,6 +15,7 @@ from vidscribe.finalization import DestinationConflict, FinalizationError, Sessi
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import (
     CreateSessionRequest,
+    Mention,
     OpenCompletedSessionRequest,
     PickerRequest,
     PickerSelection,
@@ -27,7 +28,77 @@ from vidscribe.pipeline import SessionPipeline
 from vidscribe.selections import SelectionRegistry
 from vidscribe.session_dates import infer_session_date
 from vidscribe.session_record import validate_session_record
+from vidscribe.snapshots import render_snapshot_section
 from vidscribe.transcription import DeterministicTranscriber, GroqWhisperTranscriber, Transcriber
+
+
+def _replacement_with_source_capitalization(source: str, replacement: str) -> str:
+    """Keep an initial sentence capital when a grouped mention is corrected."""
+    source_letter = next((character for character in source if character.isalpha()), "")
+    replacement_index = next(
+        (index for index, character in enumerate(replacement) if character.isalpha()),
+        None,
+    )
+    if (
+        not source_letter
+        or replacement_index is None
+        or not source_letter.isupper()
+        or source.upper() == source
+    ):
+        return replacement
+    return (
+        replacement[:replacement_index]
+        + replacement[replacement_index].upper()
+        + replacement[replacement_index + 1 :]
+    )
+
+
+def _phrase_pattern(phrase: str) -> re.Pattern[str]:
+    """Match words despite Whisper/Markdown boundary punctuation differences."""
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)?", phrase)
+    if not words:
+        raise ValueError("Phrase Correction must contain a spoken word")
+    joined_words = r"[\W_]+".join(re.escape(word) for word in words)
+    return re.compile(rf"(?<!\w){joined_words}(?!\w)", flags=re.IGNORECASE)
+
+
+def _replace_phrase_everywhere(text: str, phrase: str, replacement: str) -> tuple[str, int]:
+    """Replace a reviewed phrase while retaining each occurrence's sentence case."""
+    pattern = _phrase_pattern(phrase)
+    return pattern.subn(
+        lambda match: _replacement_with_source_capitalization(match.group(0), replacement),
+        text,
+    )
+
+
+def _snapshot_filename_for_subject(filename: str, subject: str) -> str:
+    """Keep the generated sequence while deriving the readable filename from its subject."""
+    sequence, separator, _ = filename.partition("-")
+    if not separator:
+        return filename
+    slug = re.sub(r"[^a-z0-9]+", "-", subject.casefold()).strip("-")
+    return f"{sequence}-{slug}.jpg" if slug else filename
+
+
+def _propagate_phrase_correction(result, markdown: str, phrase: str, replacement: str) -> tuple[str, int]:
+    """Keep every reviewed representation of a mention synchronized from one edit."""
+    markdown, replacement_count = _replace_phrase_everywhere(markdown, phrase, replacement)
+    for snapshot in result.snapshots:
+        snapshot.subject, subject_count = _replace_phrase_everywhere(
+            snapshot.subject, phrase, replacement
+        )
+        snapshot.cue_phrase, cue_count = _replace_phrase_everywhere(
+            snapshot.cue_phrase, phrase, replacement
+        )
+        snapshot.anchor_word, anchor_count = _replace_phrase_everywhere(
+            snapshot.anchor_word, phrase, replacement
+        )
+        replacement_count += subject_count + cue_count + anchor_count
+        if subject_count:
+            snapshot.filename = _snapshot_filename_for_subject(
+                snapshot.filename, snapshot.subject
+            )
+    return markdown, replacement_count
 
 
 def create_app(
@@ -247,6 +318,25 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
 
+    @app.get("/api/sessions/{session_id}/attempts/{attempt_id}/snapshots/{filename}")
+    def get_snapshot_preview(session_id: str, attempt_id: str, filename: str) -> FileResponse:
+        try:
+            session = repository.get(session_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Session not found") from error
+        attempt = next((item for item in session.attempts if item.id == attempt_id), None)
+        if attempt is None or attempt.result is None:
+            raise HTTPException(status_code=404, detail="Completed Analysis Attempt not found")
+        snapshot = next(
+            (item for item in attempt.result.snapshots if item.filename == filename), None
+        )
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        image_path = Path(snapshot.image_path)
+        if not image_path.is_file():
+            raise HTTPException(status_code=404, detail="Snapshot image is unavailable")
+        return FileResponse(image_path, media_type="image/jpeg", filename=snapshot.filename)
+
     @app.patch(
         "/api/sessions/{session_id}/attempts/{attempt_id}/review",
         response_model=SessionView,
@@ -287,10 +377,82 @@ def create_app(
             raise HTTPException(status_code=422, detail="Speaker Labels must be unique")
         for old, new in update.speaker_renames.items():
             markdown = re.sub(rf"(?<!\\w){re.escape(old)}(?!\\w)", new.strip(), markdown)
-        for turn in result.corrected_transcript_turns:
-            if turn.speaker_label in update.speaker_renames:
-                turn.speaker_label = update.speaker_renames[turn.speaker_label].strip()
+        for mention in result.mentions:
+            if mention.speaker_label in update.speaker_renames:
+                mention.speaker_label = update.speaker_renames[mention.speaker_label].strip()
+        for snapshot in result.snapshots:
+            if snapshot.speaker_label in update.speaker_renames:
+                snapshot.speaker_label = update.speaker_renames[snapshot.speaker_label].strip()
         result.speaker_labels = labels
+        processed_phrase_corrections: set[tuple[str, str]] = set()
+        for correction in update.phrase_corrections:
+            matching_mention = next(
+                (
+                    mention
+                    for mention in result.mentions
+                    if (
+                        mention.source_word_start == correction.source_word_start
+                        and mention.source_word_end == correction.source_word_end
+                    )
+                ),
+                None,
+            )
+            words = session.transcript_word_timings[
+                correction.source_word_start : correction.source_word_end + 1
+            ]
+            if len(words) != correction.source_word_end - correction.source_word_start + 1:
+                raise HTTPException(status_code=422, detail="Phrase Correction exceeds canonical Whisper word range")
+            heard_phrase = " ".join(str(word["word"]).strip() for word in words).strip()
+            current_phrase = (
+                matching_mention.replacement or heard_phrase
+                if matching_mention is not None
+                else heard_phrase
+            )
+            try:
+                correction_key = (
+                    " ".join(re.findall(r"[^\W_]+(?:['’][^\W_]+)?", current_phrase)).casefold(),
+                    correction.replacement.strip().casefold(),
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            if correction_key not in processed_phrase_corrections:
+                try:
+                    markdown, replacement_count = _propagate_phrase_correction(
+                        result, markdown, current_phrase, correction.replacement.strip()
+                    )
+                except ValueError as error:
+                    raise HTTPException(status_code=422, detail=str(error)) from error
+                if replacement_count == 0:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Phrase Correction text is no longer present in this Session",
+                    )
+                processed_phrase_corrections.add(correction_key)
+            replacement = _replacement_with_source_capitalization(
+                heard_phrase, correction.replacement.strip()
+            )
+            if matching_mention is not None:
+                matching_mention.replacement = replacement
+            else:
+                result.mentions.append(
+                    Mention(
+                        source_word_start=correction.source_word_start,
+                        source_word_end=correction.source_word_end,
+                        replacement=replacement,
+                    )
+                )
+        known_snapshot_names = {snapshot.filename for snapshot in result.snapshots}
+        unknown_snapshot_names = set(update.snapshot_keeps) - known_snapshot_names
+        if unknown_snapshot_names:
+            raise HTTPException(status_code=422, detail="Snapshot is not proposed for this Session")
+        for snapshot in result.snapshots:
+            if snapshot.filename in update.snapshot_keeps:
+                snapshot.kept = update.snapshot_keeps[snapshot.filename]
+        markdown = render_snapshot_section(
+            markdown,
+            result.source_media_has_video,
+            result.snapshots,
+        )
         result.session_record_markdown = markdown
         try:
             validate_session_record(markdown, session.extraction_options)
@@ -328,14 +490,25 @@ def create_app(
         except RuntimeError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         session = claim.session
-        if session.status == "completed":
+        if session.status == "completed" or session.completed_folder_path is not None:
             attempt = next(item for item in session.attempts if item.id == attempt_id)
             assert attempt.result is not None
             try:
-                app.state.finalizer.overwrite_completed_record(session, attempt.result)
+                assets = app.state.finalizer.overwrite_completed_record(session, attempt.result)
             except FinalizationError as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
-            return session
+            return repository.update_session(
+                session_id,
+                status="completed",
+                stage="completed",
+                progress=100,
+                source_path=str(assets.source_path),
+                analysis_audio_path=str(assets.analysis_audio_path),
+                completed_folder_path=str(assets.folder_path),
+                finalizing_attempt_id=None,
+                finalizing_service_id=None,
+                finalizing_cross_volume=None,
+            )
         attempt = next(item for item in session.attempts if item.id == attempt_id)
         assert attempt.result is not None
         if claim.resumes_finalization:
@@ -388,8 +561,8 @@ def create_app(
             session = repository.get(session_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
-        if session.status in {"completed", "finalizing"}:
-            raise HTTPException(status_code=409, detail="Completed Sessions are readonly")
+        if session.status in {"processing", "finalizing"}:
+            raise HTTPException(status_code=409, detail="Session is already processing or committing")
         return StreamingResponse(
             pipeline.execute(session_id),
             media_type="text/event-stream",

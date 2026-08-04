@@ -10,6 +10,29 @@ export interface AnalysisResultDto {
   short_name: string;
   session_date: string;
   speaker_labels: string[];
+  mentions?: MentionDto[];
+  snapshots?: SnapshotDto[];
+  source_media_has_video?: boolean;
+}
+
+export interface MentionDto {
+  source_word_start: number;
+  source_word_end: number;
+  speaker_label?: string;
+  replacement?: string | null;
+}
+
+export interface SnapshotDto {
+  filename: string;
+  cue_phrase: string;
+  anchor_word: string;
+  speaker_label?: string;
+  kind?: 'overview' | 'detail';
+  subject: string;
+  source_word_index: number;
+  timestamp_seconds: number;
+  image_path: string;
+  kept: boolean;
 }
 
 export type AnalysisAttemptStatus = 'streaming' | 'completed' | 'error';
@@ -39,6 +62,7 @@ export interface SessionViewDto {
   extraction_options: ExtractionOptionsDto;
   analysis_audio_path: string | null;
   transcript: string | null;
+  transcript_word_timings?: Array<{ word: string; start: number; end: number }>;
   session_date: string;
   attachment_paths: string[];
   completed_folder_path?: string | null;
@@ -87,6 +111,12 @@ export interface ReviewUpdateDto {
   session_date?: string;
   short_name?: string;
   speaker_renames?: Record<string, string>;
+  snapshot_keeps?: Record<string, boolean>;
+  phrase_corrections?: Array<{
+    source_word_start: number;
+    source_word_end: number;
+    replacement: string;
+  }>;
 }
 
 export interface AnalysisDeltaDto {
@@ -128,6 +158,10 @@ export interface Speaker {
 export interface Mention {
   id: string;
   tag: string;
+  time: string;
+  context: string;
+  speakerLabel: string;
+  sourceRanges: Array<{ sourceWordStart: number; sourceWordEnd: number }>;
 }
 
 export interface AgentNote {
@@ -152,4 +186,15 @@ export interface DistillationResult {
   mentions: Mention[];
   agentNotes: AgentNote[];
   filesystem: FileTreeNode[];
+  snapshots?: Array<{
+    filename: string;
+    time: string;
+    subject: string;
+    cuePhrase: string;
+    anchorWord: string;
+    speakerLabel: string;
+    kind: 'overview' | 'detail';
+    imageUrl?: string;
+    kept: boolean;
+  }>;
 }

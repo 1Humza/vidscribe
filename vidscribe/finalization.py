@@ -12,6 +12,7 @@ from typing import Callable
 from uuid import uuid4
 
 from vidscribe.models import AnalysisResult, SessionView
+from vidscribe.snapshots import SnapshotError, SnapshotProposal, validate_snapshot_section
 
 
 class FinalizationError(Exception):
@@ -49,6 +50,24 @@ def _file_hash(path: Path) -> str:
 def _verify_copy(source: Path, copied: Path) -> None:
     if not copied.is_file() or _file_hash(source) != _file_hash(copied):
         raise FinalizationError(f"Could not verify {source.name} in staging")
+
+
+def _kept_snapshot_paths(result: AnalysisResult) -> list[tuple[SnapshotProposal, Path]]:
+    try:
+        validate_snapshot_section(
+            result.session_record_markdown, result.source_media_has_video, result.snapshots
+        )
+    except SnapshotError as error:
+        raise FinalizationError(str(error)) from error
+    paths: list[tuple[SnapshotProposal, Path]] = []
+    for snapshot in result.snapshots:
+        if not snapshot.kept:
+            continue
+        image_path = Path(snapshot.image_path)
+        if not image_path.is_file() or image_path.stat().st_size == 0:
+            raise FinalizationError(f"Snapshot {snapshot.filename} is no longer available")
+        paths.append((snapshot, image_path))
+    return paths
 
 
 def _publish_no_replace(staging_folder: Path, completed_folder: Path) -> None:
@@ -93,12 +112,14 @@ class SessionFinalizer:
         source_path = completed_folder / f"{basename}{Path(session.source_path).suffix}"
         analysis_audio_path = completed_folder / f"{basename}.24k.ogg"
         record_path = completed_folder / f"{basename}.md"
+        kept_snapshots = _kept_snapshot_paths(result)
         if (
             not completed_folder.is_dir()
             or not source_path.is_file()
             or not analysis_audio_path.is_file()
             or not record_path.is_file()
             or record_path.read_text(encoding="utf-8") != result.session_record_markdown
+            or any(not (completed_folder / snapshot.filename).is_file() for snapshot, _ in kept_snapshots)
         ):
             raise FinalizationError("Finalization requires attention before it can be recovered")
         original_source = Path(session.source_path)
@@ -113,7 +134,9 @@ class SessionFinalizer:
                 raise FinalizationError("Published Session could not remove the original Source Media") from error
         return CompletedSessionAssets(completed_folder, source_path, analysis_audio_path)
 
-    def overwrite_completed_record(self, session: SessionView, result: AnalysisResult) -> None:
+    def overwrite_completed_record(
+        self, session: SessionView, result: AnalysisResult
+    ) -> CompletedSessionAssets:
         if session.completed_folder_path is None:
             raise FinalizationError("Completed Session Folder is unavailable")
         completed_folder = Path(session.completed_folder_path)
@@ -121,17 +144,60 @@ class SessionFinalizer:
         record_path = completed_folder / f"{basename}.md"
         if not completed_folder.is_dir() or not record_path.is_file():
             raise FinalizationError("Completed Session Record is unavailable")
-        temporary_record = completed_folder / f".{record_path.name}.editing-{uuid4().hex}"
+        source_path = completed_folder / f"{basename}{Path(session.source_path).suffix}"
+        analysis_audio_path = completed_folder / f"{basename}.24k.ogg"
+        if not source_path.is_file() or not analysis_audio_path.is_file():
+            raise FinalizationError("Completed Session media is unavailable")
+        kept_snapshots = _kept_snapshot_paths(result)
+        staging_folder = completed_folder / f".{basename}.snapshot-sync-{uuid4().hex}"
+        staged_record = staging_folder / record_path.name
+        backup_folder = staging_folder / "backup"
+        managed_snapshots = {
+            snapshot.filename
+            for attempt in session.attempts
+            if attempt.result is not None
+            for snapshot in attempt.result.snapshots
+        }
+        managed_snapshots.update(snapshot.filename for snapshot in result.snapshots)
+        published_snapshot_names: list[str] = []
+        record_replaced = False
         try:
-            temporary_record.write_text(result.session_record_markdown, encoding="utf-8")
-            if temporary_record.read_text(encoding="utf-8") != result.session_record_markdown:
+            staging_folder.mkdir()
+            staged_record.write_text(result.session_record_markdown, encoding="utf-8")
+            if staged_record.read_text(encoding="utf-8") != result.session_record_markdown:
                 raise FinalizationError("Could not verify the saved Session Record")
-            os.replace(temporary_record, record_path)
+            for snapshot, image_path in kept_snapshots:
+                staged_snapshot = staging_folder / snapshot.filename
+                shutil.copy2(image_path, staged_snapshot)
+                _verify_copy(image_path, staged_snapshot)
+
+            backup_folder.mkdir()
+            for filename in managed_snapshots:
+                target = completed_folder / filename
+                if target.exists() and not target.is_file():
+                    raise FinalizationError(f"Completed Snapshot {filename} is unavailable")
+                if target.is_file():
+                    os.replace(target, backup_folder / filename)
+            os.replace(record_path, backup_folder / record_path.name)
+            for snapshot, _ in kept_snapshots:
+                os.replace(staging_folder / snapshot.filename, completed_folder / snapshot.filename)
+                published_snapshot_names.append(snapshot.filename)
+            os.replace(staged_record, record_path)
+            record_replaced = True
         except Exception as error:
-            temporary_record.unlink(missing_ok=True)
+            for filename in published_snapshot_names:
+                (completed_folder / filename).unlink(missing_ok=True)
+            if record_replaced:
+                record_path.unlink(missing_ok=True)
+            if backup_folder.is_dir():
+                for backup in backup_folder.iterdir():
+                    os.replace(backup, completed_folder / backup.name)
+            shutil.rmtree(staging_folder, ignore_errors=True)
             if isinstance(error, FinalizationError):
                 raise
-            raise FinalizationError("Could not save the Completed Session Record") from error
+            raise FinalizationError("Could not safely save the Completed Session Record") from error
+        shutil.rmtree(staging_folder, ignore_errors=True)
+        return CompletedSessionAssets(completed_folder, source_path, analysis_audio_path)
 
     def finalize(self, session: SessionView, result: AnalysisResult) -> CompletedSessionAssets:
         source = Path(session.source_path)
@@ -144,6 +210,7 @@ class SessionFinalizer:
         if not destination.is_dir():
             raise FinalizationError("Destination is no longer available")
         source_hash = _file_hash(source)
+        kept_snapshots = _kept_snapshot_paths(result)
 
         basename = session_basename(session, result)
         completed_folder = destination / basename
@@ -163,6 +230,10 @@ class SessionFinalizer:
                 raise FinalizationError("Could not verify the Session Record in staging")
             shutil.copy2(analysis_audio, staged_audio)
             _verify_copy(analysis_audio, staged_audio)
+            for snapshot, image_path in kept_snapshots:
+                staged_snapshot = staging_folder / snapshot.filename
+                shutil.copy2(image_path, staged_snapshot)
+                _verify_copy(image_path, staged_snapshot)
 
             same_volume = self._same_volume(source, destination)
             if same_volume:
@@ -182,6 +253,10 @@ class SessionFinalizer:
                 not completed_source.is_file()
                 or not completed_audio.is_file()
                 or not completed_record.is_file()
+                or any(
+                    not (completed_folder / snapshot.filename).is_file()
+                    for snapshot, _ in kept_snapshots
+                )
             ):
                 raise FinalizationError("Published Completed Session Folder did not verify")
             if not same_volume:

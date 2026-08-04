@@ -97,6 +97,12 @@ export function commitSession(sessionId: string, attemptId: string): Promise<Ses
   );
 }
 
+export function snapshotUrl(sessionId: string, attemptId: string, filename: string): string {
+  return apiUrl(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/snapshots/${encodeURIComponent(filename)}`,
+  );
+}
+
 export function getSession(id: string, signal?: AbortSignal): Promise<SessionViewDto> {
   return requestJson(`/api/sessions/${encodeURIComponent(id)}`, { signal });
 }

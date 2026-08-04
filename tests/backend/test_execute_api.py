@@ -65,6 +65,15 @@ def create_session(client: TestClient, source: Path, destination: Path) -> str:
     return response.json()["id"]
 
 
+class CountingTranscriber(DeterministicTranscriber):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def transcribe(self, audio_path: Path):
+        self.calls += 1
+        return super().transcribe(audio_path)
+
+
 def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path) -> None:
     source = tmp_path / "recording.wav"
     make_recording(source)
@@ -110,12 +119,51 @@ def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path)
     assert restored["attempts"][0]["status"] == "completed"
     assert "After" in restored["attempts"][0]["result"]["session_record_markdown"]
     assert restored["transcript_word_timings"][0]["word"] == "Before"
-    assert restored["attempts"][0]["result"]["corrected_transcript_turns"] == [
-        {"speaker_label": "Speaker 1", "text": "Before", "source_word_start": 0, "source_word_end": 0},
-        {"speaker_label": "Speaker 1", "text": "After", "source_word_start": 1, "source_word_end": 1},
-    ]
+    assert "corrected_transcript_turns" not in restored["attempts"][0]["result"]
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
     assert source.is_file()
+
+
+def test_completed_session_can_be_reexecuted_and_republished(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    transcriber = CountingTranscriber()
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            test_mode=True,
+            test_source_path=source,
+            test_destination_path=destination,
+        ),
+        transcriber=transcriber,
+        analyzer=DeterministicAnalyzer(delay_seconds=0),
+    )
+
+    with TestClient(app) as client:
+        session_id = create_session(client, source, destination)
+        assert client.post(f"/api/sessions/{session_id}/execute").status_code == 200
+        first = client.get(f"/api/sessions/{session_id}").json()
+        first_attempt_id = first["attempts"][-1]["id"]
+        assert client.post(
+            f"/api/sessions/{session_id}/attempts/{first_attempt_id}/commit"
+        ).status_code == 200
+
+        rerun = client.post(f"/api/sessions/{session_id}/execute")
+        reviewed = client.get(f"/api/sessions/{session_id}").json()
+        second_attempt_id = reviewed["attempts"][-1]["id"]
+        republished = client.post(
+            f"/api/sessions/{session_id}/attempts/{second_attempt_id}/commit"
+        )
+
+    assert rerun.status_code == 200
+    assert reviewed["status"] == "review"
+    assert len(reviewed["attempts"]) == 2
+    assert transcriber.calls == 2
+    assert republished.status_code == 200
+    assert republished.json()["status"] == "completed"
+    assert Path(republished.json()["source_path"]).is_file()
 
 
 def test_generation_failure_streams_error_and_persists_visible_partial(
@@ -146,7 +194,7 @@ def test_generation_failure_streams_error_and_persists_visible_partial(
     assert "analysis_delta" in names
     error = next(data for name, data in events if name == "analysis_error")
     assert error["raw_stream"]
-    assert error["message"] == "Analysis generation stopped. Partial output was preserved."
+    assert error["message"] == "Analysis generation stopped: Deterministic analysis failure. Partial output was preserved."
     assert restored["status"] == "error"
     assert restored["attempts"][0]["status"] == "error"
     assert restored["attempts"][0]["raw_stream"] == error["raw_stream"]
@@ -162,7 +210,7 @@ class CountingTranscriber(DeterministicTranscriber):
         return super().transcribe(audio_path)
 
 
-def test_reexecution_reuses_valid_audio_and_transcript(tmp_path: Path) -> None:
+def test_reexecution_refreshes_audio_and_transcript(tmp_path: Path) -> None:
     source = tmp_path / "recording.wav"
     make_recording(source)
     destination = tmp_path / "destination"
@@ -183,10 +231,9 @@ def test_reexecution_reuses_valid_audio_and_transcript(tmp_path: Path) -> None:
         session_id = create_session(client, source, destination)
         client.post(f"/api/sessions/{session_id}/execute")
         first = client.get(f"/api/sessions/{session_id}").json()
-        audio_mtime = Path(first["analysis_audio_path"]).stat().st_mtime_ns
         client.post(f"/api/sessions/{session_id}/execute")
         second = client.get(f"/api/sessions/{session_id}").json()
 
-    assert transcriber.calls == 1
+    assert transcriber.calls == 2
     assert second["transcript"] == first["transcript"]
-    assert Path(second["analysis_audio_path"]).stat().st_mtime_ns == audio_mtime
+    assert len(second["attempts"]) == 2

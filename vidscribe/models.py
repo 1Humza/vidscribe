@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vidscribe.snapshots import SnapshotCue, SnapshotProposal
+
 
 class ExtractionOptions(BaseModel):
     action_summary: bool = True
@@ -64,19 +66,44 @@ class AnalysisResult(BaseModel):
     session_date: str
     speaker_labels: list[str] = Field(default_factory=list)
     consulted_attachment_filenames: list[str] = Field(default_factory=list)
-    corrected_transcript_turns: list["CorrectedTranscriptTurn"] = Field(default_factory=list)
+    mentions: list["Mention"] = Field(default_factory=list)
+    snapshot_cues: list[SnapshotCue] = Field(default_factory=list)
+    snapshots: list[SnapshotProposal] = Field(default_factory=list)
+    source_media_has_video: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_provider_fields(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.pop("corrected_transcript_turns", None)
+        normalized.setdefault("mentions", normalized.pop("uncertain_phrases", []))
+        return normalized
 
 
-class CorrectedTranscriptTurn(BaseModel):
-    speaker_label: str
-    text: str
+class Mention(BaseModel):
     source_word_start: int = Field(ge=0)
     source_word_end: int = Field(ge=0)
+    speaker_label: str = ""
+    replacement: str | None = None
 
     @model_validator(mode="after")
-    def range_is_ascending(self) -> "CorrectedTranscriptTurn":
+    def range_is_ascending(self) -> "Mention":
         if self.source_word_end < self.source_word_start:
-            raise ValueError("source_word_end must not precede source_word_start")
+            raise ValueError("Mention end must not precede its start")
+        return self
+
+
+class PhraseCorrection(BaseModel):
+    source_word_start: int = Field(ge=0)
+    source_word_end: int = Field(ge=0)
+    replacement: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def range_is_ascending(self) -> "PhraseCorrection":
+        if self.source_word_end < self.source_word_start:
+            raise ValueError("Phrase Correction end must not precede its start")
         return self
 
 
@@ -87,6 +114,8 @@ class ReviewUpdate(BaseModel):
     session_date: date | None = None
     short_name: str | None = None
     speaker_renames: dict[str, str] = Field(default_factory=dict)
+    snapshot_keeps: dict[str, bool] = Field(default_factory=dict)
+    phrase_corrections: list[PhraseCorrection] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def require_a_change(self) -> "ReviewUpdate":
@@ -95,6 +124,8 @@ class ReviewUpdate(BaseModel):
             and self.session_date is None
             and self.short_name is None
             and not self.speaker_renames
+            and not self.snapshot_keeps
+            and not self.phrase_corrections
         ):
             raise ValueError("Provide at least one review edit")
         if self.short_name is not None and not self.short_name.strip():

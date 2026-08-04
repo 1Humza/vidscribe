@@ -5,12 +5,19 @@ from typing import Iterator
 
 from pydantic import ValidationError
 
-from vidscribe.analysis import AnalysisInput, Analyzer
+from vidscribe.analysis import AnalysisInput, Analyzer, parse_provider_analysis_result
 from vidscribe.database import SessionRepository
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import AnalysisResult, SessionView
-from vidscribe.session_record import validate_session_record
-from vidscribe.transcription import TranscriptFormatter, Transcriber
+from vidscribe.session_record import normalize_session_record_headings, validate_session_record
+from vidscribe.snapshots import (
+    FFmpegSnapshotExtractor,
+    SnapshotError,
+    materialize_snapshot_proposals,
+    render_snapshot_section,
+    source_has_video,
+)
+from vidscribe.transcription import TranscriptFormatter, Transcriber, WordTiming
 
 
 def _read_attached_context(paths: list[str]) -> list[tuple[str, str]]:
@@ -80,15 +87,14 @@ class SessionPipeline:
             )
             yield self._session_event(session)
 
-            if session.transcript is None:
-                transcription = self.transcriber.transcribe(prepared)
-                transcript = TranscriptFormatter().format(transcription)
-                session = self.repository.update_session(
-                    session_id,
-                    transcript=transcript,
-                    transcript_word_timings=[word.model_dump() for word in transcription.words],
-                    progress=65,
-                )
+            transcription = self.transcriber.transcribe(prepared)
+            transcript = TranscriptFormatter().format(transcription)
+            session = self.repository.update_session(
+                session_id,
+                transcript=transcript,
+                transcript_word_timings=[word.model_dump() for word in transcription.words],
+                progress=65,
+            )
             assert session.transcript is not None
 
             attempt_id = self.repository.create_attempt(
@@ -107,7 +113,13 @@ class SessionPipeline:
                 extraction_options=session.extraction_options,
                 session_date=session.session_date.isoformat(),
                 attached_context=_read_attached_context(session.attachment_paths),
-                canonical_word_count=len(session.transcript_word_timings),
+                timed_words=[
+                    (index, round(float(word["start"]) * 1000), str(word["word"]))
+                    for index, word in enumerate(session.transcript_word_timings)
+                ],
+                source_media_has_video=source_has_video(
+                    Path(session.source_path), self.media_preparer.ffprobe_path
+                ),
             )
             stream = iter(self.analyzer.stream(prepared, analysis_input))
             raw_stream = ""
@@ -127,17 +139,39 @@ class SessionPipeline:
                         "raw_stream": raw_stream,
                     },
                 )
-            result = AnalysisResult.model_validate_json(raw_stream)
+            result = parse_provider_analysis_result(raw_stream)
             if any(
-                turn.source_word_end >= len(session.transcript_word_timings)
-                for turn in result.corrected_transcript_turns
+                mention.source_word_end >= len(session.transcript_word_timings)
+                for mention in result.mentions
             ):
-                raise ValueError("Corrected Transcript turn exceeds canonical Whisper word range")
+                raise ValueError("Mention exceeds canonical Whisper word range")
+            media_is_video = analysis_input.source_media_has_video
+            result.source_media_has_video = media_is_video
+            if media_is_video:
+                words = [WordTiming.model_validate(word) for word in session.transcript_word_timings]
+                result.snapshots = materialize_snapshot_proposals(
+                    result.snapshot_cues,
+                    words,
+                    Path(session.source_path),
+                    artifact_dir / "snapshots",
+                    FFmpegSnapshotExtractor(
+                        self.media_preparer.ffmpeg_path, self.media_preparer.ffprobe_path
+                    ),
+                )
+            else:
+                result.snapshot_cues = []
+                result.snapshots = []
             result.session_record_markdown = _with_input_context(
                 result.session_record_markdown,
                 session.extra_instructions,
                 session.attachment_paths,
                 result.consulted_attachment_filenames,
+            )
+            result.session_record_markdown = normalize_session_record_headings(
+                result.session_record_markdown
+            )
+            result.session_record_markdown = render_snapshot_section(
+                result.session_record_markdown, media_is_video, result.snapshots
             )
             validate_session_record(result.session_record_markdown, session.extraction_options)
             self.repository.complete_attempt(attempt_id, result.model_dump_json())
@@ -145,8 +179,9 @@ class SessionPipeline:
                 session_id, status="review", stage="review", progress=100
             )
             yield self._event("complete", completed.model_dump(mode="json"))
-        except Exception:
-            message = "Analysis generation stopped. Partial output was preserved."
+        except Exception as error:
+            detail = str(error).strip() or "an unexpected local error occurred"
+            message = f"Analysis generation stopped: {detail}. Partial output was preserved."
             if "attempt_id" in locals():
                 self.repository.fail_attempt(attempt_id, message)
                 failed = self.repository.update_session(

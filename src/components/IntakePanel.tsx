@@ -43,15 +43,11 @@ interface IntakePanelProps {
   progress: number;
 }
 
-const extractionTiles: Array<
-  | { key: keyof ExtractionOptionsDto; label: string; pending?: false }
-  | { key: 'snapshots'; label: string; pending: true }
-> = [
+const extractionTiles: Array<{ key: keyof ExtractionOptionsDto; label: string }> = [
   { key: 'action_summary', label: 'Action Items' },
   { key: 'chapters', label: 'Chapters' },
   { key: 'topics', label: 'Topics Matrix' },
   { key: 'highlights', label: 'Highlights' },
-  { key: 'snapshots', label: 'Snapshots', pending: true },
 ];
 
 export default function IntakePanel(props: IntakePanelProps) {
@@ -91,7 +87,7 @@ export default function IntakePanel(props: IntakePanelProps) {
     .toUpperCase() || '?';
 
   const progress = props.progress > 1 ? props.progress / 100 : props.progress;
-  const canExecute = Boolean(props.source && props.destination && props.stage !== 'review');
+  const canExecute = Boolean(props.source && props.destination);
 
   return (
     <div className="w-full max-w-5xl mx-auto py-6 px-4 font-sans select-none">
@@ -290,25 +286,6 @@ export default function IntakePanel(props: IntakePanelProps) {
             <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Extract</h2>
             <div className="grid grid-cols-2 gap-2">
               {extractionTiles.map((tile) => {
-                if (tile.key === 'snapshots') {
-                  return (
-                    <button
-                      type="button"
-                      key={tile.key}
-                      aria-label={tile.label}
-                      disabled
-                      className="flex items-center space-x-3 px-3 py-2.5 rounded-xl border border-transparent text-left bg-input-canvas/30 text-muted-canvas/60 cursor-not-allowed"
-                      title="Snapshot extraction is pending implementation"
-                    >
-                      <span className="w-4 h-4 rounded border border-muted-canvas/60 flex items-center justify-center flex-shrink-0">
-                        <LockKeyhole size={9} />
-                      </span>
-                      <span className="text-xs tracking-tight truncate">{tile.label}</span>
-                      <span className="ml-auto font-mono text-[8px] uppercase tracking-wider">Pending</span>
-                    </button>
-                  );
-                }
-
                 const selected = props.extractionOptions[tile.key];
                 return (
                   <button
@@ -425,7 +402,7 @@ export default function IntakePanel(props: IntakePanelProps) {
                 }`}
               >
                 <Play size={13} fill="currentColor" />
-                <span>{props.stage === 'review' ? 'Reviewed' : 'Execute'}</span>
+                <span>{['review', 'completed'].includes(props.stage) ? 'Re-execute' : 'Execute'}</span>
               </button>
             )}
           </div>

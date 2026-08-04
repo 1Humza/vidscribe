@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App from './App';
+import App, { matchingMentionRanges } from './App';
 
 const session = {
   id: 'session-1',
@@ -41,6 +41,18 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+it('finds every case- and punctuation-insensitive mention occurrence in canonical words', () => {
+  expect(matchingMentionRanges([
+    { word: 'Slab.', start: 0, end: 0.1 },
+    { word: 'slab', start: 0.1, end: 0.2 },
+    { word: 'SLAB!', start: 0.2, end: 0.3 },
+  ], 'Slab')).toEqual([
+    { sourceWordStart: 0, sourceWordEnd: 0 },
+    { sourceWordStart: 1, sourceWordEnd: 1 },
+    { sourceWordStart: 2, sourceWordEnd: 2 },
+  ]);
+});
+
 describe('issue 2 session UI', () => {
   it('preserves the original two-stage intake and distillation workspace', () => {
     vi.stubGlobal('fetch', vi.fn());
@@ -53,7 +65,6 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('heading', { name: 'Document' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Insights & Assets' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach reference files' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Snapshots' })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Effort' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Engineering Sync: Database Migration sample preset (pending)' })).toBeDisabled();
@@ -69,7 +80,7 @@ describe('issue 2 session UI', () => {
         `event: session\ndata: ${JSON.stringify({ ...session, status: 'processing', stage: 'preparing', progress: 10 })}\n\n`,
         `event: session\ndata: ${JSON.stringify({ ...session, status: 'processing', stage: 'transcribing', progress: 40 })}\n\n`,
         'event: analysis_delta\ndata: {"attempt_id":"attempt-1","delta":"{\\\"session_record_markdown\\\":\\\"# Team","raw_stream":"{\\\"session_record_markdown\\\":\\\"# Team"}\n\n',
-        `event: complete\ndata: ${JSON.stringify({ ...session, status: 'review', stage: 'review', progress: 100, transcript: '[00:00] Speaker 1: Hello', attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '07-31-2026', speaker_labels: ['Speaker 1'] }, error: null }] })}\n\n`,
+        `event: complete\ndata: ${JSON.stringify({ ...session, status: 'review', stage: 'review', progress: 100, transcript: '[00:00] Speaker 1: Hello', transcript_word_timings: [{ word: 'Use', start: 0, end: 0.1 }, { word: 'Slab.', start: 0.1, end: 0.2 }, { word: 'slab', start: 0.2, end: 0.3 }], attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '07-31-2026', speaker_labels: ['Speaker 1'], mentions: [{ source_word_start: 1, source_word_end: 1 }, { source_word_start: 2, source_word_end: 2 }] }, error: null }] })}\n\n`,
       ]))
       .mockImplementationOnce(() => json({
         ...session,
@@ -95,21 +106,21 @@ describe('issue 2 session UI', () => {
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Snapshots' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
-    await screen.findByText('team-sync.mp4');
+    expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Select Destination' }));
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     const review = await screen.findByRole('region', { name: 'Final Review' });
     expect(review).toHaveTextContent('(Silence 00:16)');
+    expect(screen.getAllByRole('button', { name: 'Slab' })).toHaveLength(1);
     expect(screen.getByText('2026-07-31-team-sync')).toBeInTheDocument();
     expect(screen.getByText('2026-07-31-team-sync.md')).toBeInTheDocument();
     expect(screen.getByText('2026-07-31-team-sync.24k.ogg')).toBeInTheDocument();
     expect(screen.getByText('2026-07-31-team-sync.mp4')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Preview Snapshots (pending)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview Snapshots' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
     expect(screen.queryByLabelText('Session Date')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Timestamp')).toHaveTextContent('Jul 31, 2026');
@@ -192,6 +203,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByLabelText('Context and Instructions')).toHaveValue('Keep the executive summary concise.');
     expect(screen.getByText(/video • size pending • duration pending • date pending/i)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-execute' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Remove Source' }));
     expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
     expect(screen.queryByText('Alex')).not.toBeInTheDocument();
@@ -222,5 +234,46 @@ describe('issue 2 session UI', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.getByRole('region', { name: 'Analysis Preview' })).toHaveTextContent('partial');
+  });
+
+  it('clears a failed attempt preview as soon as a re-execution starts', async () => {
+    const failedSession = {
+      ...session,
+      status: 'error' as const,
+      stage: 'analyzing' as const,
+      progress: 70,
+      transcript: '[00:00] Speaker 1: Retry this recording',
+      attempts: [{
+        id: 'attempt-1', status: 'error' as const, model: 'gemini-3-flash-preview', effort: 'medium',
+        raw_stream: '{"partial":"stale preview"}', result: null, error: 'Analysis generation stopped.',
+      }],
+    };
+    let closeStream: (() => void) | undefined;
+    const encoder = new TextEncoder();
+    const retryStream = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `event: session\ndata: ${JSON.stringify({ ...failedSession, status: 'processing', stage: 'preparing', progress: 10 })}\n\n`,
+        ));
+        closeStream = () => controller.close();
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+    window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(() => json(failedSession))
+      .mockImplementationOnce(() => Promise.resolve(retryStream));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Select Source' }));
+    expect(await screen.findByRole('region', { name: 'Analysis Preview' })).toHaveTextContent('stale preview');
+    await user.click(screen.getByRole('button', { name: 'Execute' }));
+    await waitFor(() => {
+      const preview = screen.queryByRole('region', { name: 'Analysis Preview' });
+      expect(preview?.textContent || '').not.toContain('stale preview');
+    });
+    closeStream?.();
   });
 });
