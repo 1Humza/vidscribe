@@ -37,8 +37,15 @@ class OpenCompletedSessionRequest(BaseModel):
     source_selection_id: str
 
 
+class OpenSourceSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_selection_id: str
+
+
 class ResolvedSessionIntake(BaseModel):
     source_path: str
+    source_fingerprint: str
     destination_path: str
     extra_instructions: str = ""
     speaker_hints: list[str] = Field(default_factory=list)

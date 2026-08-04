@@ -49,6 +49,19 @@ export function openCompletedSession(sourceSelectionId: string): Promise<Session
   return postJson('/api/sessions/open-completed', { source_selection_id: sourceSelectionId });
 }
 
+export async function openSourceSession(sourceSelectionId: string): Promise<SessionViewDto | null> {
+  const response = await fetch(apiUrl('/api/sessions/open-source'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_selection_id: sourceSelectionId }),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`.trim());
+  }
+  return response.json() as Promise<SessionViewDto>;
+}
+
 export function pickDestination(initialPath?: string): Promise<DestinationPickerSelectionDto> {
   return postJson('/api/pickers/destination', initialPath ? { initial_path: initialPath } : {});
 }

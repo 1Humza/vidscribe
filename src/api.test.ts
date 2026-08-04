@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { commitSession, createSession, executeSession, openCompletedSession, pickCompletedSessionFolder } from './api';
+import { commitSession, createSession, executeSession, openCompletedSession, openSourceSession, pickCompletedSessionFolder } from './api';
 
 function streamResponse(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -99,6 +99,19 @@ describe('openCompletedSession', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
+    });
+  });
+
+  it('returns no Session when a selected Source Media is new', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(openSourceSession('source selection')).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/open-source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_selection_id: 'source selection' }),
     });
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { commitSession, createSession, executeSession, getSession, openCompletedSession, pickAttachments, pickDestination, pickSource, snapshotUrl, updateReview, type SessionEvent } from './api';
+import { commitSession, createSession, executeSession, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, snapshotUrl, updateReview, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -352,14 +352,8 @@ export default function App() {
       setSpeakers('');
       setAttachments([]);
       setSaveStatus('idle');
-      const savedSessionId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
-      if (!savedSessionId) return;
-      const savedSession = await getSession(savedSessionId);
-      if (savedSession.source_path === selected.path) {
-        applySession(savedSession, selectedSource);
-      } else {
-        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
-      }
+      const restored = await openSourceSession(selected.selection_id);
+      if (restored) applySession(restored, selectedSource);
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The source picker failed.'));
     } finally {

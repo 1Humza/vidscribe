@@ -11,12 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from vidscribe.analysis import Analyzer, DeterministicAnalyzer, GeminiAnalyzer
 from vidscribe.config import Settings
 from vidscribe.database import SessionRepository
+from vidscribe.fingerprints import source_fingerprint
 from vidscribe.finalization import DestinationConflict, FinalizationError, SessionFinalizer
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import (
     CreateSessionRequest,
     Mention,
     OpenCompletedSessionRequest,
+    OpenSourceSessionRequest,
     PickerRequest,
     PickerSelection,
     ReviewUpdate,
@@ -115,6 +117,7 @@ def create_app(
     assert app_settings.workspace_path is not None
     app_settings.workspace_path.mkdir(parents=True, exist_ok=True)
     repository = SessionRepository(app_settings.database_path)
+    repository.recover_interrupted_sessions()
     app = FastAPI(title="Vidscribe", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -204,6 +207,7 @@ def create_app(
         return repository.create(
             ResolvedSessionIntake(
                 source_path=str(source),
+                source_fingerprint=source_fingerprint(source),
                 destination_path=str(destination),
                 extra_instructions=request.extra_instructions,
                 speaker_hints=request.speaker_hints,
@@ -212,6 +216,21 @@ def create_app(
                 attachment_paths=[str(attachment) for attachment in attachments],
             )
         )
+
+    @app.post("/api/sessions/open-source", response_model=SessionView)
+    def open_source_session(request: OpenSourceSessionRequest) -> SessionView:
+        try:
+            source = selections.resolve(request.source_selection_id, "source")
+        except KeyError as error:
+            raise HTTPException(
+                status_code=422, detail="Picker selection is invalid or expired"
+            ) from error
+        if not source.is_file():
+            raise HTTPException(status_code=422, detail="Source Media must be an existing file")
+        try:
+            return repository.get_by_source_fingerprint(source_fingerprint(source), source)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Session not found for Source Media") from error
 
     @app.post("/api/pickers/source", response_model=PickerSelection)
     def choose_source(request: PickerRequest) -> PickerSelection:

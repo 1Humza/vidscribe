@@ -26,6 +26,10 @@ function json(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } }));
 }
 
+function noSourceSession() {
+  return json({ detail: 'Session not found for Source Media' }, 404);
+}
+
 function sse(chunks: string[]) {
   const encoder = new TextEncoder();
   return Promise.resolve(new Response(new ReadableStream({
@@ -74,6 +78,7 @@ describe('issue 2 session UI', () => {
   it('uses opaque picker selections, previews raw streaming, then promotes a validated result', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(noSourceSession)
       .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
       .mockImplementationOnce(() => json(session, 201))
       .mockImplementationOnce(() => sse([
@@ -126,7 +131,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByLabelText('Timestamp')).toHaveTextContent('Jul 31, 2026');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vidscribe.activeSessionId')).toBe('session-1');
-    const createRequest = fetchMock.mock.calls[2][1] as RequestInit;
+    const createRequest = fetchMock.mock.calls[3][1] as RequestInit;
     expect(JSON.parse(createRequest.body as string)).toMatchObject({
       source_selection_id: 'source-token',
       destination_selection_id: 'destination-token',
@@ -135,13 +140,13 @@ describe('issue 2 session UI', () => {
     const title = screen.getByLabelText('Short Name');
     await user.clear(title);
     await user.type(title, 'Renamed meeting{Enter}');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    expect((fetchMock.mock.calls[4][1] as RequestInit).method).toBe('PATCH');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    expect((fetchMock.mock.calls[5][1] as RequestInit).method).toBe('PATCH');
     expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Commit' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    const commitRequest = fetchMock.mock.calls[5][1] as RequestInit;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    const commitRequest = fetchMock.mock.calls[6][1] as RequestInit;
     expect(commitRequest.method).toBe('POST');
     expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
@@ -156,6 +161,7 @@ describe('issue 2 session UI', () => {
     }), { headers: { 'content-type': 'text/event-stream' } });
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(noSourceSession)
       .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
       .mockImplementationOnce(() => json(session, 201))
       .mockImplementationOnce(() => Promise.resolve(openStream));
@@ -172,7 +178,7 @@ describe('issue 2 session UI', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Execute' })).toBeEnabled());
   });
 
-  it('keeps a saved session cleared until the same source is selected again', async () => {
+  it('restores a Session returned for the selected Source Media', async () => {
     window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
     const hydrated = {
       ...session,
@@ -196,6 +202,7 @@ describe('issue 2 session UI', () => {
     render(<App />);
 
     expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findByRole('region', { name: 'Final Review' })).toHaveTextContent('Restored review');
     expect(screen.getByText('Alex')).toBeInTheDocument();
@@ -213,6 +220,7 @@ describe('issue 2 session UI', () => {
     const streamedPreview = '{"partial":"first\\nsecond"}';
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(noSourceSession)
       .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
       .mockImplementationOnce(() => json(session, 201))
       .mockImplementationOnce(() => sse([
@@ -258,7 +266,6 @@ describe('issue 2 session UI', () => {
         closeStream = () => controller.close();
       },
     }), { headers: { 'content-type': 'text/event-stream' } });
-    window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
       .mockImplementationOnce(() => json(failedSession))

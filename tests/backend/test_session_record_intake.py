@@ -65,6 +65,12 @@ def test_session_date_defaults_to_creation_day_when_source_has_no_reliable_date(
 
     with TestClient(create_app(settings)) as client:
         missing = create_request(client)
+
+    confirmed_source = tmp_path / "confirmed-recording.wav"
+    confirmed_source.write_bytes(b"confirmed recording")
+    settings.test_source_path = confirmed_source
+
+    with TestClient(create_app(settings)) as client:
         confirmed = create_request(client, session_date="2026-08-01")
 
     assert missing.status_code == 201

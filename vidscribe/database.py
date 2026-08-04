@@ -45,6 +45,7 @@ class SessionRepository:
                     stage TEXT NOT NULL,
                     progress INTEGER NOT NULL,
                     source_path TEXT NOT NULL,
+                    source_fingerprint TEXT,
                     destination_path TEXT NOT NULL,
                     extra_instructions TEXT NOT NULL,
                     speaker_hints TEXT NOT NULL DEFAULT '[]',
@@ -80,6 +81,8 @@ class SessionRepository:
             }
             if "session_date" not in columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN session_date TEXT")
+            if "source_fingerprint" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN source_fingerprint TEXT")
             if "attachment_paths" not in columns:
                 connection.execute(
                     "ALTER TABLE sessions ADD COLUMN attachment_paths TEXT NOT NULL DEFAULT '[]'"
@@ -100,31 +103,47 @@ class SessionRepository:
                 connection.execute("ALTER TABLE sessions ADD COLUMN finalizing_service_id TEXT")
             if "finalizing_cross_volume" not in columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN finalizing_cross_volume INTEGER")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS sessions_source_fingerprint ON sessions(source_fingerprint)"
+            )
 
     def create(self, request: ResolvedSessionIntake) -> SessionView:
-        session_id = str(uuid4())
         now = datetime.now(UTC).isoformat()
         with self.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO sessions (
-                    id, status, stage, progress, source_path, destination_path,
-                    extra_instructions, speaker_hints, extraction_options, session_date, attachment_paths, created_at, updated_at
-                ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    str(Path(request.source_path).resolve()),
-                    str(Path(request.destination_path).resolve()),
-                    request.extra_instructions,
-                    json.dumps(request.speaker_hints),
-                    request.extraction_options.model_dump_json(),
-                    request.session_date.isoformat(),
-                    json.dumps(request.attachment_paths),
-                    now,
-                    now,
-                ),
-            )
+            existing = connection.execute(
+                "SELECT id, status FROM sessions WHERE source_fingerprint = ? ORDER BY updated_at DESC LIMIT 1",
+                (request.source_fingerprint,),
+            ).fetchone()
+            if existing is not None:
+                session_id = existing["id"]
+                if existing["status"] != "completed":
+                    connection.execute(
+                        "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
+                        (str(Path(request.source_path).resolve()), now, session_id),
+                    )
+            else:
+                session_id = str(uuid4())
+                connection.execute(
+                    """
+                    INSERT INTO sessions (
+                        id, status, stage, progress, source_path, source_fingerprint, destination_path,
+                        extra_instructions, speaker_hints, extraction_options, session_date, attachment_paths, created_at, updated_at
+                    ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        str(Path(request.source_path).resolve()),
+                        request.source_fingerprint,
+                        str(Path(request.destination_path).resolve()),
+                        request.extra_instructions,
+                        json.dumps(request.speaker_hints),
+                        request.extraction_options.model_dump_json(),
+                        request.session_date.isoformat(),
+                        json.dumps(request.attachment_paths),
+                        now,
+                        now,
+                    ),
+                )
         return self.get(session_id)
 
     def get(self, session_id: str) -> SessionView:
@@ -161,6 +180,43 @@ class SessionRepository:
         if row is None:
             raise KeyError(str(folder_path))
         return self.get(row["id"])
+
+    def get_by_source_fingerprint(self, fingerprint: str, source_path: Path) -> SessionView:
+        now = datetime.now(UTC).isoformat()
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT id, status FROM sessions WHERE source_fingerprint = ? ORDER BY updated_at DESC LIMIT 1",
+                (fingerprint,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(fingerprint)
+            if row["status"] != "completed":
+                connection.execute(
+                    "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
+                    (str(source_path.resolve()), now, row["id"]),
+                )
+        return self.get(row["id"])
+
+    def recover_interrupted_sessions(self) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self.connection() as connection:
+            connection.execute(
+                """
+                UPDATE analysis_attempts
+                SET status = 'error', error = COALESCE(error, ?), updated_at = ?
+                WHERE status = 'streaming'
+                  AND session_id IN (SELECT id FROM sessions WHERE status = 'processing')
+                """,
+                ("Analysis generation was interrupted. Execute again to retry.", now),
+            )
+            connection.execute(
+                """
+                UPDATE sessions
+                SET status = 'ready', stage = 'intake', progress = 0, updated_at = ?
+                WHERE status = 'processing'
+                """,
+                (now,),
+            )
 
     def update_session(self, session_id: str, **changes: object) -> SessionView:
         allowed = {
