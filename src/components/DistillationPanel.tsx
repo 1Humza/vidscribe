@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Copy,
   Check,
@@ -47,6 +47,7 @@ interface DistillationPanelProps {
   markdownText: string;
   setMarkdownText: (text: string) => void;
   onSaveMarkdown: () => void;
+  highlightPhrase: string | null;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onSelectSource: () => void;
   isReadOnly: boolean;
@@ -62,6 +63,7 @@ export default function DistillationPanel({
   markdownText,
   setMarkdownText,
   onSaveMarkdown,
+  highlightPhrase,
   saveStatus,
   onSelectSource,
   isReadOnly
@@ -75,7 +77,7 @@ export default function DistillationPanel({
     transcribing: 'Transcribing the complete recording with Groq Whisper.',
     analyzing: 'Streaming schema-constrained analysis from Gemini.',
     review: 'Validated review is ready.',
-    completed: 'Completed Session Folder is verified and readonly.',
+    completed: 'Completed Session Folder is verified. Re-execute to create a new attempt.',
   }[stage];
   const activeStageIndex = PROCESSING_STAGES.findIndex((item) => item.stage === stage);
 
@@ -97,6 +99,21 @@ export default function DistillationPanel({
     a.download = `${result?.title || 'distillation'}.md`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (highlightPhrase) setViewMode('rich');
+  }, [highlightPhrase]);
+
+  const highlightText = (text: string): React.ReactNode => {
+    const phrase = highlightPhrase?.trim();
+    if (!phrase) return text;
+    const expression = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.split(expression).map((part, index) => (
+      index % 2 === 1
+        ? <mark key={index} data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{part}</mark>
+        : part
+    ));
   };
 
   // Renders markdown content to HTML with quiet room styles and interactive checkboxes
@@ -193,7 +210,7 @@ export default function DistillationPanel({
             <span className={`text-sm font-sans leading-relaxed transition-all ${
               isChecked ? 'text-muted-canvas line-through' : 'text-main-canvas'
             }`}>
-              {renderedText}
+              {highlightText(typeof renderedText === 'string' ? renderedText : text)}
             </span>
           </div>
         );
@@ -205,7 +222,7 @@ export default function DistillationPanel({
         return (
           <li key={idx} className="list-none flex items-start space-x-2 my-2 text-sm text-muted-canvas pl-0.5">
             <span className="mt-2 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-muted-canvas" />
-            <span>{text}</span>
+            <span>{highlightText(text)}</span>
           </li>
         );
       }
@@ -218,14 +235,14 @@ export default function DistillationPanel({
           return (
             <div key={idx} className="flex items-start space-x-2.5 my-2.5 text-sm text-muted-canvas font-sans pl-0.5">
               <span className="font-mono text-main-canvas text-xs font-semibold">{matchNumber[1]}.</span>
-              <span>{matchNumber[2]}</span>
+              <span>{highlightText(matchNumber[2])}</span>
             </div>
           );
         }
 
         return (
           <p key={idx} className="text-sm text-muted-canvas font-sans leading-relaxed my-2.5">
-            {trimmed}
+            {highlightText(trimmed)}
           </p>
         );
       }

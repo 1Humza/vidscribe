@@ -594,6 +594,7 @@ export default function App() {
                 setReviewMarkdown(text);
               }}
               onSaveMarkdown={() => saveReview({ session_record_markdown: reviewMarkdown }, markdownVersionRef.current)}
+              highlightPhrase={activeMentionPhrase}
               saveStatus={saveStatus}
               onSelectSource={selectSource}
               isReadOnly={isReviewReadOnly}
