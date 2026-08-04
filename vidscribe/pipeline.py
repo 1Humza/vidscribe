@@ -62,6 +62,18 @@ class SessionPipeline:
         self.transcriber = transcriber
         self.analyzer = analyzer
 
+    def _has_reusable_preparation(self, session: SessionView) -> bool:
+        if not session.analysis_audio_path or not session.transcript:
+            return False
+        audio_path = Path(session.analysis_audio_path)
+        if not self.media_preparer.is_valid(audio_path):
+            return False
+        try:
+            [WordTiming.model_validate(word) for word in session.transcript_word_timings]
+        except (TypeError, ValueError):
+            return False
+        return bool(session.transcript_word_timings)
+
     def execute(self, session_id: str) -> Iterator[str]:
         session = self.repository.get(session_id)
         if self.transcriber is None or self.analyzer is None:
@@ -78,23 +90,26 @@ class SessionPipeline:
         artifact_dir = self.workspace_path / session_id
         audio_path = artifact_dir / "analysis.24k.ogg"
         try:
-            prepared = self.media_preparer.prepare(Path(session.source_path), audio_path)
-            session = self.repository.update_session(
-                session_id,
-                stage="transcribing",
-                progress=40,
-                analysis_audio_path=str(prepared),
-            )
-            yield self._session_event(session)
+            if self._has_reusable_preparation(session):
+                prepared = Path(session.analysis_audio_path)
+            else:
+                prepared = self.media_preparer.prepare(Path(session.source_path), audio_path)
+                session = self.repository.update_session(
+                    session_id,
+                    stage="transcribing",
+                    progress=40,
+                    analysis_audio_path=str(prepared),
+                )
+                yield self._session_event(session)
 
-            transcription = self.transcriber.transcribe(prepared)
-            transcript = TranscriptFormatter().format(transcription)
-            session = self.repository.update_session(
-                session_id,
-                transcript=transcript,
-                transcript_word_timings=[word.model_dump() for word in transcription.words],
-                progress=65,
-            )
+                transcription = self.transcriber.transcribe(prepared)
+                transcript = TranscriptFormatter().format(transcription)
+                session = self.repository.update_session(
+                    session_id,
+                    transcript=transcript,
+                    transcript_word_timings=[word.model_dump() for word in transcription.words],
+                    progress=65,
+                )
             assert session.transcript is not None
 
             attempt_id = self.repository.create_attempt(

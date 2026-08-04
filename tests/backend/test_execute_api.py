@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from vidscribe.analysis import DeterministicAnalyzer
 from vidscribe.app import create_app
 from vidscribe.config import Settings
+from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.transcription import DeterministicTranscriber
 
 
@@ -72,6 +73,16 @@ class CountingTranscriber(DeterministicTranscriber):
     def transcribe(self, audio_path: Path):
         self.calls += 1
         return super().transcribe(audio_path)
+
+
+class CountingMediaPreparer(FFmpegMediaPreparer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def prepare(self, source: Path, output: Path) -> Path:
+        self.calls += 1
+        return super().prepare(source, output)
 
 
 def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path) -> None:
@@ -160,7 +171,7 @@ def test_completed_session_can_be_reexecuted_and_republished(tmp_path: Path) -> 
     assert rerun.status_code == 200
     assert reviewed["status"] == "review"
     assert len(reviewed["attempts"]) == 2
-    assert transcriber.calls == 2
+    assert transcriber.calls == 1
     assert republished.status_code == 200
     assert republished.json()["status"] == "completed"
     assert Path(republished.json()["source_path"]).is_file()
@@ -201,21 +212,13 @@ def test_generation_failure_streams_error_and_persists_visible_partial(
     assert restored["attempts"][0]["error"] == error["message"]
 
 
-class CountingTranscriber(DeterministicTranscriber):
-    def __init__(self):
-        self.calls = 0
-
-    def transcribe(self, audio_path: Path):
-        self.calls += 1
-        return super().transcribe(audio_path)
-
-
-def test_reexecution_refreshes_audio_and_transcript(tmp_path: Path) -> None:
+def test_reexecution_reuses_valid_audio_and_transcript(tmp_path: Path) -> None:
     source = tmp_path / "recording.wav"
     make_recording(source)
     destination = tmp_path / "destination"
     destination.mkdir()
     transcriber = CountingTranscriber()
+    media_preparer = CountingMediaPreparer()
     app = create_app(
         Settings(
             data_dir=tmp_path / "data",
@@ -225,6 +228,7 @@ def test_reexecution_refreshes_audio_and_transcript(tmp_path: Path) -> None:
         ),
         transcriber=transcriber,
         analyzer=DeterministicAnalyzer(delay_seconds=0),
+        media_preparer=media_preparer,
     )
 
     with TestClient(app) as client:
@@ -234,6 +238,42 @@ def test_reexecution_refreshes_audio_and_transcript(tmp_path: Path) -> None:
         client.post(f"/api/sessions/{session_id}/execute")
         second = client.get(f"/api/sessions/{session_id}").json()
 
-    assert transcriber.calls == 2
+    assert media_preparer.calls == 1
+    assert transcriber.calls == 1
     assert second["transcript"] == first["transcript"]
+    assert len(second["attempts"]) == 2
+
+
+def test_reexecution_rebuilds_invalid_cached_preparation(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    transcriber = CountingTranscriber()
+    media_preparer = CountingMediaPreparer()
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            test_mode=True,
+            test_source_path=source,
+            test_destination_path=destination,
+        ),
+        transcriber=transcriber,
+        analyzer=DeterministicAnalyzer(delay_seconds=0),
+        media_preparer=media_preparer,
+    )
+
+    with TestClient(app) as client:
+        session_id = create_session(client, source, destination)
+        assert client.post(f"/api/sessions/{session_id}/execute").status_code == 200
+        first = client.get(f"/api/sessions/{session_id}").json()
+        Path(first["analysis_audio_path"]).write_bytes(b"invalid cache")
+
+        rerun = client.post(f"/api/sessions/{session_id}/execute")
+        second = client.get(f"/api/sessions/{session_id}").json()
+
+    assert rerun.status_code == 200
+    assert second["status"] == "review"
+    assert media_preparer.calls == 2
+    assert transcriber.calls == 2
     assert len(second["attempts"]) == 2

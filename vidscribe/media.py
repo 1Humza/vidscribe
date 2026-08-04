@@ -16,7 +16,7 @@ class FFmpegMediaPreparer:
     def prepare(self, source: Path, output: Path) -> Path:
         source = source.resolve()
         output = output.resolve()
-        if self._is_valid(output):
+        if self.is_valid(output):
             return output
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f".{output.name}.{uuid4().hex}.tmp.ogg")
@@ -52,7 +52,7 @@ class FFmpegMediaPreparer:
                 text=True,
                 check=True,
             )
-            if not self._is_valid(temporary):
+            if not self.is_valid(temporary):
                 raise MediaPreparationError("FFmpeg produced invalid Analysis Audio")
             temporary.replace(output)
             return output
@@ -62,7 +62,7 @@ class FFmpegMediaPreparer:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _is_valid(self, path: Path) -> bool:
+    def is_valid(self, path: Path) -> bool:
         if not path.is_file() or path.stat().st_size == 0:
             return False
         try:
