@@ -4,7 +4,6 @@ import { commitSession, createSession, executeSession, getSession, openCompleted
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
-import GlassModal from './components/GlassModal';
 import type {
   AnalysisResultDto,
   DistillationResult,
@@ -208,7 +207,13 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light'
+  ));
   const [source, setSource] = useState<SelectedSource | null>(null);
   const [destination, setDestination] = useState<SelectedDestination | null>(null);
   const [context, setContext] = useState('');
@@ -291,6 +296,15 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const preference = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncTheme = () => setTheme(preference.matches ? 'dark' : 'light');
+    syncTheme();
+    preference.addEventListener('change', syncTheme);
+    return () => preference.removeEventListener('change', syncTheme);
+  }, []);
 
   useEffect(() => {
     if (!isProcessing) return;
@@ -514,13 +528,6 @@ export default function App() {
 
   return (
     <div className="h-screen w-full overflow-y-scroll scroll-smooth bg-app-canvas text-main-canvas font-sans select-none relative transition-colors duration-200">
-      <header className="fixed top-4 right-6 z-50 flex items-center space-x-2.5 bg-panel-canvas/80 backdrop-blur-md px-4 py-2.5 rounded-full border border-muted-canvas shadow-sm">
-        <Workflow size={16} className="text-orange-500 mr-1.5" />
-        <span className="text-xs font-mono text-muted-canvas uppercase tracking-wider font-bold mr-2">Signal Console</span>
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-1 rounded-full hover:bg-input-canvas text-muted-canvas hover:text-main-canvas transition-colors cursor-pointer" title={`Toggle ${theme === 'dark' ? 'Light' : 'Dark'} mode`}>{theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}</button>
-        <button onClick={() => setShowGuide(true)} className="p-1 rounded-full hover:bg-input-canvas text-muted-canvas hover:text-main-canvas transition-colors cursor-pointer" title="Workspace Help Guide"><HelpCircle size={15} /></button>
-      </header>
-
       {errorNotice && (
         <div role="alert" className="fixed z-[60] top-16 left-1/2 -translate-x-1/2 w-[min(92vw,700px)] p-3 rounded-xl border border-rose-500/30 bg-panel-canvas text-rose-500 text-sm flex justify-between items-center shadow-lg">
           <span className="flex items-center gap-2"><AlertCircle size={16} />{errorNotice}</span>
@@ -568,14 +575,14 @@ export default function App() {
         aria-label={review ? 'Final Review' : analysisPreview ? 'Analysis Preview' : undefined}
         className="min-h-screen h-screen shrink-0 flex flex-col overflow-hidden relative bg-panel-canvas/45"
       >
-        <div className="flex-shrink-0 flex items-center justify-between px-8 md:px-14 lg:px-24 py-3.5 border-b border-muted-canvas bg-panel-canvas/80 backdrop-blur-md">
-          <button onClick={scrollToIntake} className="flex items-center space-x-2 text-xs font-mono uppercase tracking-wider text-muted-canvas hover:text-main-canvas transition-colors font-bold cursor-pointer">
-            <ChevronUp size={18} className="text-orange-500" />
-            <span>← Back to Intake Configuration</span>
+        <div className="flex-shrink-0 flex items-center justify-center gap-4 px-6 py-2 border-b border-muted-canvas bg-panel-canvas/80 backdrop-blur-md">
+          <span className="max-w-[58vw] truncate text-sm font-medium text-main-canvas">
+            {source?.name || 'Distillation Workspace'}
+          </span>
+          <button onClick={scrollToIntake} className="flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-muted-canvas hover:text-main-canvas transition-colors font-bold cursor-pointer">
+            <ChevronUp size={15} className="text-orange-500" />
+            <span>Back to intake</span>
           </button>
-          <div className="flex items-center space-x-3.5 text-xs font-mono text-muted-canvas">
-            {source && <span className="hidden md:inline truncate max-w-xs font-semibold text-main-canvas">Feed: {source.name}</span>}
-          </div>
         </div>
 
         <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-6 w-full max-w-[1600px] mx-auto px-6 md:px-12 lg:px-20 py-6">
@@ -626,10 +633,6 @@ export default function App() {
           </section>
         </div>
       </section>
-
-      <GlassModal isOpen={showGuide} onClose={() => setShowGuide(false)} title="Workspace Intelligence Guide">
-        <div className="space-y-3 text-sm text-muted-canvas"><p>Choose a local recording and destination through service-owned pickers, then execute the durable session.</p><p>Raw provider output appears as Analysis Preview. Final Review is created only after the backend validates the complete schema.</p><p>Issue 2 never commits, moves, or deletes your source.</p></div>
-      </GlassModal>
     </div>
   );
 }
