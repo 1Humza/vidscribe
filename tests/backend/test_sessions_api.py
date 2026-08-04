@@ -97,6 +97,8 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
             "chapters": True,
             "highlights": False,
         },
+        "model": "gemini-3-flash-preview",
+        "effort": "medium",
         "analysis_audio_path": None,
         "transcript": None,
         "session_date": "2026-07-31",

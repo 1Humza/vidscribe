@@ -6,6 +6,8 @@ import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
 import type {
   AnalysisResultDto,
+  AnalysisEffortDto,
+  AnalysisModelDto,
   DistillationResult,
   ExtractionOptionsDto,
   FileTreeNode,
@@ -149,6 +151,7 @@ function toReview(
   return {
     title: result.short_name,
     timestamp: formatTimestamp(result.session_date, session.created_at),
+    sessionDate: result.session_date,
     markdown,
     speakers: result.speaker_labels.map((name, index) => ({
       id: `speaker-${index + 1}`,
@@ -225,6 +228,8 @@ export default function App() {
     chapters: true,
     highlights: false,
   });
+  const [model, setModel] = useState<AnalysisModelDto>('gemini-3-flash-preview');
+  const [effort, setEffort] = useState<AnalysisEffortDto>('medium');
   const [session, setSession] = useState<SessionViewDto | null>(null);
   const [analysisPreview, setAnalysisPreview] = useState('');
   const [reviewMarkdown, setReviewMarkdown] = useState('');
@@ -281,6 +286,8 @@ export default function App() {
     setSpeakers(intake.speakers);
     setAttachments((next.attachment_paths || []).map((path) => ({ path, name: fileName(path) })));
     setExtractionOptions(next.extraction_options);
+    setModel(next.model);
+    setEffort(next.effort);
     const attempt = next.attempts.at(-1);
     if (attempt?.result) {
       if (!preserveMarkdownDraft) setReviewMarkdown(attempt.result.session_record_markdown);
@@ -437,12 +444,14 @@ export default function App() {
         extraInstructions: context,
         speakerHints: speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean),
         extractionOptions,
+        model,
+        effort,
         attachmentSelectionIds: attachments.map((attachment) => attachment.selectionId).filter((id): id is string => Boolean(id)),
       });
       applySession(active);
       const controller = new AbortController();
       executeAbortRef.current = controller;
-      await executeSession(active.id, handleEvent, controller.signal);
+      await executeSession(active.id, handleEvent, { model, effort }, controller.signal);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setErrorNotice(errorMessage(error, 'The session could not be executed.'));
@@ -546,6 +555,13 @@ export default function App() {
             setSpeakers={setSpeakers}
             extractionOptions={extractionOptions}
             setExtractionOptions={setExtractionOptions}
+            model={model}
+            setModel={(nextModel) => {
+              setModel(nextModel);
+              if (nextModel === 'gemini-2.5-flash' && effort === 'minimal') setEffort('low');
+            }}
+            effort={effort}
+            setEffort={setEffort}
             onExecute={handleExecute}
             isProcessing={isProcessing}
             onAbort={handleAbort}
@@ -605,6 +621,7 @@ export default function App() {
             <InsightsPanel
               result={review}
               onSaveIdentity={(short_name) => saveReview({ short_name })}
+              onSaveSessionDate={(session_date) => saveReview({ session_date })}
               onRenameSpeaker={(from, to) => saveReview({ speaker_renames: { [from]: to } })}
               onReviewEdit={() => setSaveStatus('idle')}
               onSnapshotKeep={(filename, kept) => saveReview({ snapshot_keeps: { [filename]: kept } })}

@@ -5,7 +5,6 @@ import {
   FileAudio,
   FileVideo,
   Inbox,
-  LockKeyhole,
   Paperclip,
   Play,
   Plus,
@@ -15,6 +14,8 @@ import {
 } from 'lucide-react';
 import type {
   ExtractionOptionsDto,
+  AnalysisEffortDto,
+  AnalysisModelDto,
   SelectedDestination,
   SelectedAttachment,
   SelectedSource,
@@ -36,6 +37,10 @@ interface IntakePanelProps {
   setSpeakers: (value: string) => void;
   extractionOptions: ExtractionOptionsDto;
   setExtractionOptions: (value: ExtractionOptionsDto) => void;
+  model: AnalysisModelDto;
+  setModel: (value: AnalysisModelDto) => void;
+  effort: AnalysisEffortDto;
+  setEffort: (value: AnalysisEffortDto) => void;
   onExecute: () => void;
   onAbort: () => void;
   isProcessing: boolean;
@@ -334,16 +339,17 @@ export default function IntakePanel(props: IntakePanelProps) {
           </div>
 
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3" aria-label="Locked provider settings">
+            <div className="grid grid-cols-2 gap-3" aria-label="Analysis settings">
               <div className="relative">
                 <select
                   aria-label="Engine"
-                  defaultValue="gemini-3-flash"
-                  disabled
-                  className="w-full bg-input-canvas border border-muted-canvas text-xs text-main-canvas pl-2.5 pr-8 py-2.5 rounded-xl appearance-none cursor-not-allowed disabled:opacity-70"
-                  title="Engine selection is locked for this milestone"
+                  value={props.model}
+                  onChange={(event) => props.setModel(event.target.value as AnalysisModelDto)}
+                  disabled={props.isProcessing}
+                  className="w-full bg-input-canvas border border-muted-canvas text-xs text-main-canvas pl-2.5 pr-8 py-2.5 rounded-xl appearance-none cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  <option value="gemini-3-flash">Gemini 3 Flash</option>
+                  <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 </select>
                 <Cpu size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-canvas" />
               </div>
@@ -351,20 +357,18 @@ export default function IntakePanel(props: IntakePanelProps) {
               <div className="relative">
                 <select
                   aria-label="Effort"
-                  defaultValue="medium"
-                  disabled
-                  className="w-full bg-input-canvas border border-muted-canvas text-xs text-main-canvas pl-2.5 pr-8 py-2.5 rounded-xl appearance-none cursor-not-allowed disabled:opacity-70"
-                  title="Effort selection is locked for this milestone"
+                  value={props.effort}
+                  onChange={(event) => props.setEffort(event.target.value as AnalysisEffortDto)}
+                  disabled={props.isProcessing}
+                  className="w-full bg-input-canvas border border-muted-canvas text-xs text-main-canvas pl-2.5 pr-8 py-2.5 rounded-xl appearance-none cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
                 >
+                  {props.model === 'gemini-3-flash-preview' && <option value="minimal">Minimal</option>}
+                  <option value="low">Low</option>
                   <option value="medium">Medium</option>
+                  <option value="high">High</option>
                 </select>
                 <Server size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-canvas" />
               </div>
-            </div>
-
-            <div className="flex items-center justify-center space-x-1.5 text-[9px] font-mono uppercase tracking-wider text-muted-canvas">
-              <LockKeyhole size={10} />
-              <span>Provider controls locked for this milestone</span>
             </div>
 
             <div aria-live="polite" className="rounded-xl bg-input-canvas/50 border border-muted-canvas px-3 py-2.5">

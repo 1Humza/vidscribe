@@ -50,6 +50,8 @@ class SessionRepository:
                     extra_instructions TEXT NOT NULL,
                     speaker_hints TEXT NOT NULL DEFAULT '[]',
                     extraction_options TEXT NOT NULL,
+                    model TEXT NOT NULL DEFAULT 'gemini-3-flash-preview',
+                    effort TEXT NOT NULL DEFAULT 'medium',
                     analysis_audio_path TEXT,
                     transcript TEXT,
                     session_date TEXT,
@@ -81,6 +83,14 @@ class SessionRepository:
             }
             if "session_date" not in columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN session_date TEXT")
+            if "model" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'gemini-3-flash-preview'"
+                )
+            if "effort" not in columns:
+                connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT 'medium'"
+                )
             if "source_fingerprint" not in columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN source_fingerprint TEXT")
             if "attachment_paths" not in columns:
@@ -127,8 +137,8 @@ class SessionRepository:
                     """
                     INSERT INTO sessions (
                         id, status, stage, progress, source_path, source_fingerprint, destination_path,
-                        extra_instructions, speaker_hints, extraction_options, session_date, attachment_paths, created_at, updated_at
-                    ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        extra_instructions, speaker_hints, extraction_options, model, effort, session_date, attachment_paths, created_at, updated_at
+                    ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -138,6 +148,8 @@ class SessionRepository:
                         request.extra_instructions,
                         json.dumps(request.speaker_hints),
                         request.extraction_options.model_dump_json(),
+                        request.model,
+                        request.effort,
                         request.session_date.isoformat(),
                         json.dumps(request.attachment_paths),
                         now,
@@ -228,6 +240,8 @@ class SessionRepository:
             "transcript_word_timings",
             "source_path",
             "completed_folder_path",
+            "model",
+            "effort",
             "finalizing_attempt_id",
             "finalizing_service_id",
             "finalizing_cross_volume",

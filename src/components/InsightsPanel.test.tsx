@@ -30,6 +30,7 @@ it('allows Final Review to remove a proposed Snapshot', async () => {
         }],
       }}
       onSaveIdentity={vi.fn()}
+      onSaveSessionDate={vi.fn()}
       onRenameSpeaker={vi.fn()}
       onReviewEdit={vi.fn()}
       onSnapshotKeep={onSnapshotKeep}
@@ -64,7 +65,7 @@ it('edits a terminology Mention tag without dismissing it', async () => {
         mentions: [{ id: '2-3', tag: 'reclass plug in', time: '01:50', context: 'I use the reclass plug in here', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 3 }] }],
         agentNotes: [], filesystem: [], snapshots: [],
       }}
-      onSaveIdentity={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
       onMentionCorrect={onMentionCorrect} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
@@ -89,7 +90,7 @@ it('shows mention context immediately and marks the Snapshot anchor', async () =
         mentions: [{ id: '2-3', tag: 'Slab', time: '02:10', context: 'I am going to rename it Slab now', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 3 }] }],
         agentNotes: [], filesystem: [], snapshots: [{ filename: '02-slab.jpg', time: '02:10', subject: 'Slab creation', cuePhrase: 'I am going to rename it Slab now', anchorWord: 'Slab', speakerLabel: 'Developer', kind: 'detail', kept: true }],
       }}
-      onSaveIdentity={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
       onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
@@ -114,7 +115,7 @@ it('cycles the bare snapshot viewer with arrow keys', async () => {
           { filename: '02-detail.jpg', time: '00:20', subject: 'Door detail', cuePhrase: 'here is the lock detail', anchorWord: 'detail', speakerLabel: 'Developer', kind: 'detail', kept: true },
         ],
       }}
-      onSaveIdentity={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
       onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
@@ -139,7 +140,7 @@ it('applies one mention correction to every grouped source range', async () => {
         mentions: [{ id: 'slab', tag: 'Slab', time: '02:10', context: 'I am going to rename it Slab now', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 2 }, { sourceWordStart: 9, sourceWordEnd: 9 }] }],
         agentNotes: [], filesystem: [], snapshots: [],
       }}
-      onSaveIdentity={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
       onMentionCorrect={onMentionCorrect} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );

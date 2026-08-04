@@ -106,6 +106,39 @@ def test_commit_marks_existing_completed_folder_as_needing_attention(tmp_path: P
     assert list(conflict.iterdir()) == []
 
 
+def test_recommit_renames_completed_assets_after_a_session_date_correction(tmp_path: Path) -> None:
+    source = tmp_path / "2026-07-31-recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        test_mode=True,
+        test_source_path=source,
+        test_destination_path=destination,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        session_id, attempt_id = create_reviewed_session(client)
+        assert client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit").status_code == 200
+        corrected = client.patch(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
+            json={"session_date": "2026-08-01"},
+        )
+        recommitted = client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit")
+
+    assert corrected.status_code == 200
+    assert recommitted.status_code == 200
+    completed_folder = destination / "2026-08-01-pipeline-test-sync"
+    assert not (destination / "2026-07-31-pipeline-test-sync").exists()
+    assert sorted(path.name for path in completed_folder.iterdir()) == [
+        "2026-08-01-pipeline-test-sync.24k.ogg",
+        "2026-08-01-pipeline-test-sync.md",
+        "2026-08-01-pipeline-test-sync.wav",
+    ]
+    assert recommitted.json()["completed_folder_path"] == str(completed_folder.resolve())
+
+
 def test_commit_restores_source_when_same_volume_publication_fails(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "2026-07-31-recording.wav"
     make_recording(source)
@@ -449,7 +482,7 @@ def test_restart_preserves_replacement_at_cross_volume_source_path(tmp_path: Pat
     assert source.read_bytes() == b"a different recording"
 
 
-def test_completed_session_edits_overwrite_its_saved_record_without_moving_source(tmp_path: Path) -> None:
+def test_completed_session_identity_edits_rename_its_saved_assets(tmp_path: Path) -> None:
     source = tmp_path / "2026-07-31-recording.wav"
     make_recording(source)
     destination = tmp_path / "destination"
@@ -476,9 +509,11 @@ def test_completed_session_edits_overwrite_its_saved_record_without_moving_sourc
     assert second_commit.json()["completed_folder_path"] == first_commit.json()["completed_folder_path"]
     assert review_edit.status_code == 200
     assert saved_edit.status_code == 200
-    record = Path(first_commit.json()["completed_folder_path"]) / "2026-07-31-pipeline-test-sync.md"
+    completed_folder = Path(saved_edit.json()["completed_folder_path"])
+    record = completed_folder / "2026-07-31-changed-after-completion.md"
     assert "Changed after completion" in record.read_text()
-    assert Path(first_commit.json()["source_path"]).is_file()
+    assert not Path(first_commit.json()["completed_folder_path"]).exists()
+    assert Path(saved_edit.json()["source_path"]).is_file()
 
 
 def test_completed_session_folder_selection_reopens_its_saved_record(tmp_path: Path) -> None:

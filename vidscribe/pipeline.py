@@ -112,9 +112,7 @@ class SessionPipeline:
                 )
             assert session.transcript is not None
 
-            attempt_id = self.repository.create_attempt(
-                session_id, self.analyzer.model, self.analyzer.effort
-            )
+            attempt_id = self.repository.create_attempt(session_id, session.model, session.effort)
             analysis_input = AnalysisInput(
                 transcript=session.transcript,
                 extra_instructions="\n".join(
@@ -135,6 +133,8 @@ class SessionPipeline:
                 source_media_has_video=source_has_video(
                     Path(session.source_path), self.media_preparer.ffprobe_path
                 ),
+                model=session.model,
+                effort=session.effort,
             )
             stream = iter(self.analyzer.stream(prepared, analysis_input))
             raw_stream = ""

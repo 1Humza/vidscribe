@@ -4,6 +4,8 @@ import type {
   CreateSessionRequestDto,
   DestinationPickerSelectionDto,
   AttachmentPickerSelectionDto,
+  AnalysisEffortDto,
+  AnalysisModelDto,
   ExtractionOptionsDto,
   PipelineErrorDto,
   SessionViewDto,
@@ -78,6 +80,8 @@ export function createSession(input: {
   extractionOptions: ExtractionOptionsDto;
   sessionDate?: string;
   attachmentSelectionIds?: string[];
+  model?: AnalysisModelDto;
+  effort?: AnalysisEffortDto;
 }): Promise<SessionViewDto> {
   const request: CreateSessionRequestDto = {
     source_selection_id: input.sourceSelectionId,
@@ -87,6 +91,8 @@ export function createSession(input: {
     extraction_options: input.extractionOptions,
     session_date: input.sessionDate || undefined,
     attachment_selection_ids: input.attachmentSelectionIds?.length ? input.attachmentSelectionIds : undefined,
+    model: input.model,
+    effort: input.effort,
   };
   return postJson('/api/sessions', request);
 }
@@ -165,10 +171,16 @@ function dispatchFrame(frame: string, onEvent: SessionEventHandler) {
   }
 }
 
-export async function executeSession(id: string, onEvent: SessionEventHandler, signal?: AbortSignal) {
+export async function executeSession(
+  id: string,
+  onEvent: SessionEventHandler,
+  selection?: { model: AnalysisModelDto; effort: AnalysisEffortDto },
+  signal?: AbortSignal,
+) {
   const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(id)}/execute`), {
     method: 'POST',
-    headers: { Accept: 'text/event-stream' },
+    headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+    body: selection ? JSON.stringify(selection) : undefined,
     signal,
   });
   if (!response.ok) throw new Error(`Execution failed (${response.status}).`);

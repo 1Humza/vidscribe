@@ -16,6 +16,8 @@ class AnalysisInput(BaseModel):
     attached_context: list[tuple[str, str]] = Field(default_factory=list)
     timed_words: list[tuple[int, int, str]] = Field(default_factory=list)
     source_media_has_video: bool = False
+    model: str = ""
+    effort: str = ""
 
 
 def analysis_response_json_schema() -> dict:
@@ -84,12 +86,12 @@ class GeminiAnalyzer:
         try:
             uploaded_audio = self.client.files.upload(file=str(audio_path))
             response = self.client.models.generate_content_stream(
-                model=self.model,
+                model=analysis_input.model or self.model,
                 contents=[prompt, uploaded_audio],
                 config={
                     "response_mime_type": "application/json",
                     "response_json_schema": analysis_response_json_schema(),
-                    "thinking_config": {"thinking_level": self.effort},
+                    "thinking_config": {"thinking_level": analysis_input.effort or self.effort},
                 },
             )
             for chunk in response:

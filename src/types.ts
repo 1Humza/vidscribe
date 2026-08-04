@@ -60,6 +60,8 @@ export interface SessionViewDto {
   extra_instructions: string;
   speaker_hints: string[];
   extraction_options: ExtractionOptionsDto;
+  model: AnalysisModelDto;
+  effort: AnalysisEffortDto;
   analysis_audio_path: string | null;
   transcript: string | null;
   transcript_word_timings?: Array<{ word: string; start: number; end: number }>;
@@ -104,7 +106,12 @@ export interface CreateSessionRequestDto {
   extraction_options: ExtractionOptionsDto;
   session_date?: string;
   attachment_selection_ids?: string[];
+  model?: AnalysisModelDto;
+  effort?: AnalysisEffortDto;
 }
+
+export type AnalysisModelDto = 'gemini-3-flash-preview' | 'gemini-2.5-flash';
+export type AnalysisEffortDto = 'minimal' | 'low' | 'medium' | 'high';
 
 export interface ReviewUpdateDto {
   session_record_markdown?: string;
@@ -181,6 +188,7 @@ export interface FileTreeNode {
 export interface DistillationResult {
   title: string;
   timestamp: string;
+  sessionDate?: string;
   markdown: string;
   speakers: Speaker[];
   mentions: Mention[];

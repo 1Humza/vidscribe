@@ -150,6 +150,7 @@ def test_review_edits_persist_identity_and_global_speaker_renames(tmp_path: Path
 
     assert response.status_code == 200
     result = restored["attempts"][0]["result"]
+    assert restored["session_date"] == "2026-08-01"
     assert result["short_name"] == "Roadmap Sync"
     assert result["session_date"] == "08-01-2026"
     assert result["speaker_labels"] == ["Ada", "Ben"]

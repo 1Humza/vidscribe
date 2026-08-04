@@ -104,6 +104,43 @@ class SessionFinalizer:
     def paths_share_volume(self, source: Path, destination: Path) -> bool:
         return self._same_volume(source, destination)
 
+    def _rename_completed_identity_assets(
+        self, session: SessionView, result: AnalysisResult, assets: CompletedSessionAssets
+    ) -> CompletedSessionAssets:
+        """Keep an edited Session Identity aligned with its completed folder and core assets."""
+        previous_basename = assets.folder_path.name
+        basename = session_basename(session, result)
+        if basename == previous_basename:
+            return assets
+        renamed_folder = Path(session.destination_path) / basename
+        if renamed_folder.exists():
+            raise DestinationConflict("A Completed Session Folder with this name already exists")
+        renamed_assets = (
+            (assets.source_path, assets.folder_path / f"{basename}{assets.source_path.suffix}"),
+            (assets.analysis_audio_path, assets.folder_path / f"{basename}.24k.ogg"),
+            (assets.folder_path / f"{previous_basename}.md", assets.folder_path / f"{basename}.md"),
+        )
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for current, renamed in renamed_assets:
+                if renamed.exists():
+                    raise FinalizationError(f"Completed asset {renamed.name} already exists")
+                os.rename(current, renamed)
+                moved.append((current, renamed))
+            _publish_no_replace(assets.folder_path, renamed_folder)
+        except Exception as error:
+            for current, renamed in reversed(moved):
+                if renamed.exists() and not current.exists():
+                    os.rename(renamed, current)
+            if isinstance(error, FinalizationError):
+                raise
+            raise FinalizationError("Could not safely rename the Completed Session") from error
+        return CompletedSessionAssets(
+            renamed_folder,
+            renamed_folder / f"{basename}{assets.source_path.suffix}",
+            renamed_folder / f"{basename}.24k.ogg",
+        )
+
     def recover_published(
         self, session: SessionView, result: AnalysisResult, *, cross_volume: bool
     ) -> CompletedSessionAssets:
@@ -197,7 +234,11 @@ class SessionFinalizer:
                 raise
             raise FinalizationError("Could not safely save the Completed Session Record") from error
         shutil.rmtree(staging_folder, ignore_errors=True)
-        return CompletedSessionAssets(completed_folder, source_path, analysis_audio_path)
+        return self._rename_completed_identity_assets(
+            session,
+            result,
+            CompletedSessionAssets(completed_folder, source_path, analysis_audio_path),
+        )
 
     def finalize(self, session: SessionView, result: AnalysisResult) -> CompletedSessionAssets:
         source = Path(session.source_path)

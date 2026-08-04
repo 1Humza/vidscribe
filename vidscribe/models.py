@@ -19,9 +19,20 @@ class ExtractionOptions(BaseModel):
         return self
 
 
-class CreateSessionRequest(BaseModel):
+class AnalysisSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    model: Literal["gemini-3-flash-preview", "gemini-2.5-flash"] = "gemini-3-flash-preview"
+    effort: Literal["minimal", "low", "medium", "high"] = "medium"
+
+    @model_validator(mode="after")
+    def validate_model_effort(self) -> "AnalysisSelection":
+        if self.model == "gemini-2.5-flash" and self.effort == "minimal":
+            raise ValueError("Gemini 2.5 Flash supports low, medium, or high effort")
+        return self
+
+
+class CreateSessionRequest(AnalysisSelection):
     source_selection_id: str
     destination_selection_id: str
     extra_instructions: str = ""
@@ -43,7 +54,22 @@ class OpenSourceSessionRequest(BaseModel):
     source_selection_id: str
 
 
-class ResolvedSessionIntake(BaseModel):
+class ExecuteSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: Literal["gemini-3-flash-preview", "gemini-2.5-flash"] | None = None
+    effort: Literal["minimal", "low", "medium", "high"] | None = None
+
+    @model_validator(mode="after")
+    def validate_model_effort(self) -> "ExecuteSessionRequest":
+        if (self.model is None) != (self.effort is None):
+            raise ValueError("Select both an analysis model and effort")
+        if self.model == "gemini-2.5-flash" and self.effort == "minimal":
+            raise ValueError("Gemini 2.5 Flash supports low, medium, or high effort")
+        return self
+
+
+class ResolvedSessionIntake(AnalysisSelection):
     source_path: str
     source_fingerprint: str
     destination_path: str
@@ -164,6 +190,8 @@ class SessionView(BaseModel):
     extra_instructions: str
     speaker_hints: list[str] = Field(default_factory=list)
     extraction_options: ExtractionOptions
+    model: Literal["gemini-3-flash-preview", "gemini-2.5-flash"]
+    effort: Literal["minimal", "low", "medium", "high"]
     analysis_audio_path: str | None = None
     transcript: str | None = None
     session_date: date

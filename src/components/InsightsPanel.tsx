@@ -24,6 +24,7 @@ import GlassModal from './GlassModal';
 interface InsightsPanelProps {
   result: DistillationResult | null;
   onSaveIdentity: (shortName: string) => void;
+  onSaveSessionDate: (sessionDate: string) => void;
   onRenameSpeaker: (from: string, to: string) => void;
   onReviewEdit: () => void;
   onSnapshotKeep: (filename: string, kept: boolean) => void;
@@ -61,7 +62,12 @@ function SnapshotEvidence({ cuePhrase, anchorWord }: Pick<ReviewSnapshot, 'cuePh
   );
 }
 
-export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
+function isoDate(sessionDate: string): string {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(sessionDate);
+  return match ? `${match[3]}-${match[1]}-${match[2]}` : sessionDate;
+}
+
+export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [activeSnapshotFilename, setActiveSnapshotFilename] = useState<string | null>(null);
   const [editingMention, setEditingMention] = useState<string | null>(null);
@@ -216,8 +222,21 @@ export default function InsightsPanel({ result, onSaveIdentity, onRenameSpeaker,
               </div>
 
               <div className="shrink-0">
-                <div className="text-xs font-bold text-muted-canvas uppercase tracking-wider mb-1">Timestamp</div>
-                <div aria-label="Timestamp" className="w-full whitespace-nowrap bg-input-canvas border border-muted-canvas text-sm text-muted-canvas font-mono px-2.5 py-1.5 rounded">
+                <div className="text-xs font-bold text-muted-canvas uppercase tracking-wider mb-1">Session Date</div>
+                <input
+                  key={`session-date-${result.sessionDate || result.timestamp}`}
+                  type="date"
+                  defaultValue={isoDate(result.sessionDate || '')}
+                  onChange={(event) => {
+                    if (!event.currentTarget.value) return;
+                    onReviewEdit();
+                    onSaveSessionDate(event.currentTarget.value);
+                  }}
+                  disabled={isReadOnly}
+                  aria-label="Session Date"
+                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-sm text-main-canvas font-mono px-2.5 py-1.5 rounded focus:outline-none transition-colors"
+                />
+                <div aria-label="Timestamp" className="mt-1 text-[10px] text-muted-canvas font-mono">
                   {result.timestamp}
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { matchingMentionRanges } from './App';
@@ -17,6 +17,8 @@ const session = {
   transcript: null,
   session_date: '2026-07-31',
   attachment_paths: [],
+  model: 'gemini-3-flash-preview',
+  effort: 'medium',
   attempts: [],
   created_at: '2026-07-31T12:00:00Z',
   updated_at: '2026-07-31T12:00:00Z',
@@ -69,8 +71,8 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('heading', { name: 'Document' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Insights & Assets' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach reference files' })).toBeEnabled();
-    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Effort' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Engineering Sync: Database Migration sample preset (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Product Design: Mobile App Redesign sample preset (pending)' })).toBeDisabled();
   });
@@ -92,17 +94,31 @@ describe('issue 2 session UI', () => {
         status: 'review',
         stage: 'review',
         progress: 100,
-        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '07-31-2026', speaker_labels: ['Speaker 1'] } }],
+        session_date: '2026-08-01',
+        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-2.5-flash', effort: 'low', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '08-01-2026', speaker_labels: ['Speaker 1'] } }],
+      }))
+      .mockImplementationOnce(() => json({
+        ...session,
+        status: 'review',
+        stage: 'review',
+        progress: 100,
+        session_date: '2026-08-01',
+        model: 'gemini-2.5-flash',
+        effort: 'low',
+        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-2.5-flash', effort: 'low', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '08-01-2026', speaker_labels: ['Speaker 1'] } }],
       }))
       .mockImplementationOnce(() => json({
         ...session,
         status: 'completed',
         stage: 'completed',
         progress: 100,
-        source_path: '/archive/syncs/2026-07-31-renamed-meeting.mp4',
-        analysis_audio_path: '/archive/syncs/2026-07-31-renamed-meeting.24k.ogg',
-        completed_folder_path: '/archive/syncs/2026-07-31-renamed-meeting',
-        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '07-31-2026', speaker_labels: ['Speaker 1'] } }],
+        session_date: '2026-08-01',
+        model: 'gemini-2.5-flash',
+        effort: 'low',
+        source_path: '/archive/syncs/2026-08-01-renamed-meeting.mp4',
+        analysis_audio_path: '/archive/syncs/2026-08-01-renamed-meeting.24k.ogg',
+        completed_folder_path: '/archive/syncs/2026-08-01-renamed-meeting',
+        attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-2.5-flash', effort: 'low', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Renamed meeting', session_date: '08-01-2026', speaker_labels: ['Speaker 1'] } }],
       }));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
@@ -110,7 +126,10 @@ describe('issue 2 session UI', () => {
 
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeEnabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Effort' }), 'minimal');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Engine' }), 'gemini-2.5-flash');
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('low');
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Select Destination' }));
@@ -127,7 +146,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview Snapshots' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
-    expect(screen.queryByLabelText('Session Date')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-07-31');
     expect(screen.getByLabelText('Timestamp')).toHaveTextContent('Jul 31, 2026');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vidscribe.activeSessionId')).toBe('session-1');
@@ -135,18 +154,28 @@ describe('issue 2 session UI', () => {
     expect(JSON.parse(createRequest.body as string)).toMatchObject({
       source_selection_id: 'source-token',
       destination_selection_id: 'destination-token',
+      model: 'gemini-2.5-flash',
+      effort: 'low',
     });
+    const executeRequest = fetchMock.mock.calls[4][1] as RequestInit;
+    expect(JSON.parse(executeRequest.body as string)).toEqual({ model: 'gemini-2.5-flash', effort: 'low' });
+
+    fireEvent.change(screen.getByLabelText('Session Date'), { target: { value: '2026-08-01' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    expect(JSON.parse((fetchMock.mock.calls[5][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01' });
+    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-08-01');
+    expect(screen.getByText('2026-08-01-team-sync')).toBeInTheDocument();
 
     const title = screen.getByLabelText('Short Name');
     await user.clear(title);
     await user.type(title, 'Renamed meeting{Enter}');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    expect((fetchMock.mock.calls[5][1] as RequestInit).method).toBe('PATCH');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    expect((fetchMock.mock.calls[6][1] as RequestInit).method).toBe('PATCH');
     expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Commit' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
-    const commitRequest = fetchMock.mock.calls[6][1] as RequestInit;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8));
+    const commitRequest = fetchMock.mock.calls[7][1] as RequestInit;
     expect(commitRequest.method).toBe('POST');
     expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');

@@ -16,6 +16,7 @@ from vidscribe.finalization import DestinationConflict, FinalizationError, Sessi
 from vidscribe.media import FFmpegMediaPreparer
 from vidscribe.models import (
     CreateSessionRequest,
+    ExecuteSessionRequest,
     Mention,
     OpenCompletedSessionRequest,
     OpenSourceSessionRequest,
@@ -212,6 +213,8 @@ def create_app(
                 extra_instructions=request.extra_instructions,
                 speaker_hints=request.speaker_hints,
                 extraction_options=request.extraction_options,
+                model=request.model,
+                effort=request.effort,
                 session_date=session_date,
                 attachment_paths=[str(attachment) for attachment in attachments],
             )
@@ -575,13 +578,17 @@ def create_app(
         )
 
     @app.post("/api/sessions/{session_id}/execute")
-    def execute_session(session_id: str) -> StreamingResponse:
+    def execute_session(
+        session_id: str, request: ExecuteSessionRequest = ExecuteSessionRequest()
+    ) -> StreamingResponse:
         try:
             session = repository.get(session_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
         if session.status in {"processing", "finalizing"}:
             raise HTTPException(status_code=409, detail="Session is already processing or committing")
+        if request.model is not None and request.effort is not None:
+            repository.update_session(session_id, model=request.model, effort=request.effort)
         return StreamingResponse(
             pipeline.execute(session_id),
             media_type="text/event-stream",
