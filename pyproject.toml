@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vidscribe"
+version = "0.1.0"
+description = "Local service for distilling recorded media into durable Session Records"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "google-genai>=1.0,<2",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.10,<3",
+  "python-dotenv>=1.1,<2",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.4,<10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["vidscribe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/backend"]
+addopts = "-ra"
+markers = [
+  "live: opt-in tests that call paid provider APIs",
+]
+
