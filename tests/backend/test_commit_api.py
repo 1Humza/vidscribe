@@ -80,6 +80,7 @@ def test_commit_publishes_one_verified_completed_session_folder(tmp_path: Path) 
     assert payload["source_path"] == str(
         (completed_folder / "2026-07-31-pipeline-test-sync.wav").resolve()
     )
+    assert payload["attempts"][0]["raw_stream"] == ""
 
 
 def test_commit_marks_existing_completed_folder_as_needing_attention(tmp_path: Path) -> None:

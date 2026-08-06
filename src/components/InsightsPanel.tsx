@@ -24,7 +24,7 @@ import GlassModal from './GlassModal';
 interface InsightsPanelProps {
   result: DistillationResult | null;
   onSaveIdentity: (shortName: string) => void;
-  onSaveSessionDate: (sessionDate: string) => void;
+  onSaveSessionDate: (sessionDate: string, sessionTime: string) => void;
   onRenameSpeaker: (from: string, to: string) => void;
   onReviewEdit: () => void;
   onSnapshotKeep: (filename: string, kept: boolean) => void;
@@ -223,21 +223,21 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
 
               <div className="shrink-0">
                 <div className="text-xs font-bold text-muted-canvas uppercase tracking-wider mb-1">Session Date</div>
-                <input
-                  key={`session-date-${result.sessionDate || result.timestamp}`}
-                  type="date"
-                  defaultValue={isoDate(result.sessionDate || '')}
-                  onChange={(event) => {
-                    if (!event.currentTarget.value) return;
-                    onReviewEdit();
-                    onSaveSessionDate(event.currentTarget.value);
-                  }}
-                  disabled={isReadOnly}
-                  aria-label="Session Date"
-                  className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-sm text-main-canvas font-mono px-2.5 py-1.5 rounded focus:outline-none transition-colors"
-                />
-                <div aria-label="Timestamp" className="mt-1 text-[10px] text-muted-canvas font-mono">
-                  {result.timestamp}
+                <div className="flex items-center gap-2 bg-input-canvas border border-muted-canvas hover:border-active-canvas focus-within:border-active-canvas rounded px-2.5 py-1.5 transition-colors">
+                  <input
+                    key={`session-date-${result.sessionDate || result.timestamp}`}
+                    type="datetime-local"
+                    defaultValue={`${isoDate(result.sessionDate || '')}T${(result.sessionTime || '00:00').slice(0, 5)}`}
+                    onChange={(event) => {
+                      if (!event.currentTarget.value) return;
+                      onReviewEdit();
+                      const [sessionDate, sessionTime] = event.currentTarget.value.split('T');
+                      onSaveSessionDate(sessionDate, sessionTime);
+                    }}
+                    disabled={isReadOnly}
+                    aria-label="Session Date"
+                    className="min-w-0 bg-transparent text-sm text-main-canvas font-mono outline-none"
+                  />
                 </div>
               </div>
             </div>

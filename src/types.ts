@@ -66,6 +66,7 @@ export interface SessionViewDto {
   transcript: string | null;
   transcript_word_timings?: Array<{ word: string; start: number; end: number }>;
   session_date: string;
+  session_time: string;
   attachment_paths: string[];
   completed_folder_path?: string | null;
   attempts: AnalysisAttemptDto[];
@@ -116,6 +117,7 @@ export type AnalysisEffortDto = 'minimal' | 'low' | 'medium' | 'high';
 export interface ReviewUpdateDto {
   session_record_markdown?: string;
   session_date?: string;
+  session_time?: string;
   short_name?: string;
   speaker_renames?: Record<string, string>;
   snapshot_keeps?: Record<string, boolean>;
@@ -189,6 +191,7 @@ export interface DistillationResult {
   title: string;
   timestamp: string;
   sessionDate?: string;
+  sessionTime?: string;
   markdown: string;
   speakers: Speaker[];
   mentions: Mention[];

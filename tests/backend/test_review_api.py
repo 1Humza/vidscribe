@@ -4,7 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from vidscribe.app import _replacement_with_source_capitalization, create_app
+from vidscribe.app import create_app
+from vidscribe.review import _replacement_with_source_capitalization
 from vidscribe.config import Settings
 from vidscribe.snapshots import SnapshotProposal, render_snapshot_section
 from vidscribe.transcription import DeterministicTranscriber, Transcription, WordTiming
@@ -139,6 +140,7 @@ def test_review_edits_persist_identity_and_global_speaker_renames(tmp_path: Path
             json={
                 "session_record_markdown": original["attempts"][0]["result"]["session_record_markdown"],
                 "session_date": "2026-08-01",
+                "session_time": "14:30",
                 "short_name": "Roadmap Sync",
                 "speaker_renames": {"Speaker 1": "Ada", "Speaker 2": "Ben"},
                 "phrase_corrections": [
@@ -151,6 +153,7 @@ def test_review_edits_persist_identity_and_global_speaker_renames(tmp_path: Path
     assert response.status_code == 200
     result = restored["attempts"][0]["result"]
     assert restored["session_date"] == "2026-08-01"
+    assert restored["session_time"] == "14:30:00"
     assert result["short_name"] == "Roadmap Sync"
     assert result["session_date"] == "08-01-2026"
     assert result["speaker_labels"] == ["Ada", "Ben"]

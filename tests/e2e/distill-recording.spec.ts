@@ -76,11 +76,10 @@ test.describe('real recording tracer bullet', () => {
     await page.getByRole('button', { name: 'Select Source' }).click();
     const sourcePickerRequest = await sourcePickerRequestPromise;
     expect(new URL(sourcePickerRequest.url()).origin).toBe('http://127.0.0.1:5173');
-    await expect(page.getByText('source.wav', { exact: true })).toBeVisible();
+    await expect(page.getByTitle('source.wav', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Select Destination' }).click();
     await expect(page.getByText(destinationPath, { exact: false })).toBeVisible();
-    await page.getByLabel('Session Date').fill('2026-07-31');
 
     const sessionRequestPromise = page.waitForRequest(
       (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/sessions',
@@ -132,7 +131,7 @@ test.describe('real recording tracer bullet', () => {
 
     await page.reload();
 
-    await expect(page.getByText('source.wav', { exact: true })).toBeVisible();
+    await expect(page.getByTitle('source.wav', { exact: true })).toBeVisible();
     await expect(page.getByText(destinationPath, { exact: false })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Analysis Preview' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Final Review' })).toContainText('(Silence 00:16)');

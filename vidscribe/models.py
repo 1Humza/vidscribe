@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -145,6 +145,7 @@ class ReviewUpdate(BaseModel):
 
     session_record_markdown: str | None = None
     session_date: date | None = None
+    session_time: time | None = None
     short_name: str | None = None
     speaker_renames: dict[str, str] = Field(default_factory=dict)
     snapshot_keeps: dict[str, bool] = Field(default_factory=dict)
@@ -155,6 +156,7 @@ class ReviewUpdate(BaseModel):
         if (
             self.session_record_markdown is None
             and self.session_date is None
+            and self.session_time is None
             and self.short_name is None
             and not self.speaker_renames
             and not self.snapshot_keeps
@@ -195,6 +197,7 @@ class SessionView(BaseModel):
     analysis_audio_path: str | None = None
     transcript: str | None = None
     session_date: date
+    session_time: time
     attachment_paths: list[str] = Field(default_factory=list)
     transcript_word_timings: list[dict[str, object]] = Field(default_factory=list)
     completed_folder_path: str | None = None

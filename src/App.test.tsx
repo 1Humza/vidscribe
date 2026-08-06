@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App, { matchingMentionRanges } from './App';
+import App from './App';
+import { matchingMentionRanges } from './sessionReview';
 
 const session = {
   id: 'session-1',
@@ -16,6 +17,7 @@ const session = {
   analysis_audio_path: null,
   transcript: null,
   session_date: '2026-07-31',
+  session_time: '12:00:00',
   attachment_paths: [],
   model: 'gemini-3-flash-preview',
   effort: 'medium',
@@ -94,7 +96,7 @@ describe('issue 2 session UI', () => {
         status: 'review',
         stage: 'review',
         progress: 100,
-        session_date: '2026-08-01',
+        session_date: '2026-08-01', session_time: '14:30:00',
         attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-2.5-flash', effort: 'low', raw_stream: '{}', error: null, result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '08-01-2026', speaker_labels: ['Speaker 1'] } }],
       }))
       .mockImplementationOnce(() => json({
@@ -146,8 +148,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview Snapshots' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
-    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-07-31');
-    expect(screen.getByLabelText('Timestamp')).toHaveTextContent('Jul 31, 2026');
+    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-07-31T12:00');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vidscribe.activeSessionId')).toBe('session-1');
     const createRequest = fetchMock.mock.calls[3][1] as RequestInit;
@@ -160,10 +161,10 @@ describe('issue 2 session UI', () => {
     const executeRequest = fetchMock.mock.calls[4][1] as RequestInit;
     expect(JSON.parse(executeRequest.body as string)).toEqual({ model: 'gemini-2.5-flash', effort: 'low' });
 
-    fireEvent.change(screen.getByLabelText('Session Date'), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText('Session Date'), { target: { value: '2026-08-01T14:30' } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    expect(JSON.parse((fetchMock.mock.calls[5][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01' });
-    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-08-01');
+    expect(JSON.parse((fetchMock.mock.calls[5][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01', session_time: '14:30' });
+    expect(screen.getByLabelText('Session Date')).toHaveValue('2026-08-01T14:30');
     expect(screen.getByText('2026-08-01-team-sync')).toBeInTheDocument();
 
     const title = screen.getByLabelText('Short Name');
@@ -207,7 +208,7 @@ describe('issue 2 session UI', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Execute' })).toBeEnabled());
   });
 
-  it('restores a Session returned for the selected Source Media', async () => {
+  it('restores the active Session after a browser refresh', async () => {
     window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
     const hydrated = {
       ...session,
@@ -223,16 +224,12 @@ describe('issue 2 session UI', () => {
       }],
     };
     const fetchMock = vi.fn()
-      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
       .mockImplementationOnce(() => json(hydrated));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 
     render(<App />);
 
-    expect(screen.queryByRole('region', { name: 'Final Review' })).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findByRole('region', { name: 'Final Review' })).toHaveTextContent('Restored review');
     expect(screen.getByText('Alex')).toBeInTheDocument();
     expect(screen.getByText('Sam')).toBeInTheDocument();

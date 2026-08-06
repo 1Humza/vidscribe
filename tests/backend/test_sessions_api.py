@@ -1,4 +1,5 @@
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -102,6 +103,7 @@ def test_session_intake_survives_service_restart(tmp_path: Path) -> None:
         "analysis_audio_path": None,
         "transcript": None,
         "session_date": "2026-07-31",
+        "session_time": restored.json()["session_time"],
         "attachment_paths": [],
         "transcript_word_timings": [],
         "completed_folder_path": None,
@@ -242,3 +244,51 @@ def test_health_reports_local_service_ready(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_raw_stream_cleanup_erases_only_inactive_attempt_text(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    source.write_bytes(b"recording")
+    destination = tmp_path / "sessions"
+    destination.mkdir()
+    app_settings = settings(tmp_path)
+    app_settings.test_source_path = source
+    app_settings.test_destination_path = destination
+
+    with TestClient(create_app(app_settings)) as client:
+        source_selection = client.post("/api/pickers/source", json={}).json()
+        destination_selection = client.post("/api/pickers/destination", json={}).json()
+        session = client.post(
+            "/api/sessions",
+            json={
+                "source_selection_id": source_selection["selection_id"],
+                "destination_selection_id": destination_selection["selection_id"],
+                "session_date": "2026-07-31",
+            },
+        ).json()
+        repository = client.app.state.sessions
+        expired_attempt = repository.create_attempt(session["id"], "test", "medium")
+        protected_attempt = repository.create_attempt(session["id"], "test", "medium")
+        repository.append_attempt_stream(expired_attempt, "expired provider output")
+        repository.append_attempt_stream(protected_attempt, "needs attention output")
+        expired_at = (datetime.now(UTC) - timedelta(days=31)).isoformat()
+        with repository.connection() as connection:
+            connection.execute(
+                "UPDATE analysis_attempts SET updated_at = ? WHERE id = ?",
+                (expired_at, expired_attempt),
+            )
+        repository.update_session(session["id"], status="review", stage="review")
+        repository.purge_expired_raw_streams(now=datetime.now(UTC))
+        cleaned = repository.get(session["id"])
+        assert next(item for item in cleaned.attempts if item.id == expired_attempt).raw_stream == ""
+
+        repository.update_session(session["id"], status="error", stage="analyzing")
+        with repository.connection() as connection:
+            connection.execute(
+                "UPDATE analysis_attempts SET updated_at = ? WHERE id = ?",
+                (expired_at, protected_attempt),
+            )
+        repository.purge_expired_raw_streams(now=datetime.now(UTC))
+        protected = repository.get(session["id"])
+
+    assert next(item for item in protected.attempts if item.id == protected_attempt).raw_stream == "needs attention output"

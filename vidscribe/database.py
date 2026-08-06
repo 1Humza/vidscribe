@@ -2,7 +2,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
@@ -55,6 +55,7 @@ class SessionRepository:
                     analysis_audio_path TEXT,
                     transcript TEXT,
                     session_date TEXT,
+                    session_time TEXT NOT NULL DEFAULT '00:00:00',
                     attachment_paths TEXT NOT NULL DEFAULT '[]',
                     transcript_word_timings TEXT NOT NULL DEFAULT '[]',
                     completed_folder_path TEXT,
@@ -83,6 +84,8 @@ class SessionRepository:
             }
             if "session_date" not in columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN session_date TEXT")
+            if "session_time" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN session_time TEXT NOT NULL DEFAULT '00:00:00'")
             if "model" not in columns:
                 connection.execute(
                     "ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'gemini-3-flash-preview'"
@@ -137,8 +140,8 @@ class SessionRepository:
                     """
                     INSERT INTO sessions (
                         id, status, stage, progress, source_path, source_fingerprint, destination_path,
-                        extra_instructions, speaker_hints, extraction_options, model, effort, session_date, attachment_paths, created_at, updated_at
-                    ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        extra_instructions, speaker_hints, extraction_options, model, effort, session_date, session_time, attachment_paths, created_at, updated_at
+                    ) VALUES (?, 'ready', 'intake', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -151,6 +154,7 @@ class SessionRepository:
                         request.model,
                         request.effort,
                         request.session_date.isoformat(),
+                        datetime.now().time().replace(microsecond=0).isoformat(),
                         json.dumps(request.attachment_paths),
                         now,
                         now,
@@ -230,6 +234,24 @@ class SessionRepository:
                 (now,),
             )
 
+    def purge_expired_raw_streams(self, *, now: datetime | None = None) -> None:
+        """Discard stale provider text while retaining the Session and its reusable preparation."""
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=30)
+        with self.connection() as connection:
+            connection.execute(
+                """
+                UPDATE analysis_attempts
+                SET raw_stream = ''
+                WHERE raw_stream != ''
+                  AND updated_at < ?
+                  AND session_id IN (
+                    SELECT id FROM sessions
+                    WHERE status NOT IN ('ready', 'processing', 'error', 'finalizing', 'needs_attention')
+                  )
+                """,
+                (cutoff.isoformat(),),
+            )
+
     def update_session(self, session_id: str, **changes: object) -> SessionView:
         allowed = {
             "status",
@@ -262,6 +284,41 @@ class SessionRepository:
             )
             if cursor.rowcount == 0:
                 raise KeyError(session_id)
+        return self.get(session_id)
+
+    def mark_commit_complete(
+        self,
+        session_id: str,
+        *,
+        source_path: str,
+        analysis_audio_path: str,
+        completed_folder_path: str,
+    ) -> SessionView:
+        """Finish a commit and remove private, redundant provider output in one transaction."""
+        with self.connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE sessions
+                SET status = 'completed', stage = 'completed', progress = 100,
+                    source_path = ?, analysis_audio_path = ?, completed_folder_path = ?,
+                    finalizing_attempt_id = NULL, finalizing_service_id = NULL,
+                    finalizing_cross_volume = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    source_path,
+                    analysis_audio_path,
+                    completed_folder_path,
+                    datetime.now(UTC).isoformat(),
+                    session_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(session_id)
+            connection.execute(
+                "UPDATE analysis_attempts SET raw_stream = '' WHERE session_id = ?",
+                (session_id,),
+            )
         return self.get(session_id)
 
     def claim_commit(
@@ -349,6 +406,7 @@ class SessionRepository:
         attempt_id: str,
         result: AnalysisResult,
         session_date: date | None = None,
+        session_time: time | None = None,
     ) -> SessionView:
         with self.connection() as connection:
             cursor = connection.execute(
@@ -370,6 +428,11 @@ class SessionRepository:
                 connection.execute(
                     "UPDATE sessions SET session_date = ?, updated_at = ? WHERE id = ?",
                     (session_date.isoformat(), datetime.now(UTC).isoformat(), session_id),
+                )
+            if session_time is not None:
+                connection.execute(
+                    "UPDATE sessions SET session_time = ?, updated_at = ? WHERE id = ?",
+                    (session_time.isoformat(), datetime.now(UTC).isoformat(), session_id),
                 )
         return self.get(session_id)
 
