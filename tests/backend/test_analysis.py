@@ -94,6 +94,24 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     assert client.files.deleted == ["files/analysis-audio"]
 
 
+def test_gemini_prefers_the_saved_system_prompt_over_the_default_intro(tmp_path: Path) -> None:
+    audio = tmp_path / "analysis.24k.ogg"
+    audio.write_bytes(b"OggS")
+    client = SimpleNamespace(files=FakeFiles(), models=FakeModels())
+    analyzer = GeminiAnalyzer(api_key="secret", client=client)
+
+    list(analyzer.stream(audio, AnalysisInput(
+        transcript="[00:00] Speaker 1: Hello",
+        extraction_options=ExtractionOptions(),
+        system_prompt="Use the Acme file naming formula: YYYY-MM-DD-title.md.",
+    )))
+
+    prompt = client.models.request["contents"][0]
+    assert prompt.startswith("Use the Acme file naming formula: YYYY-MM-DD-title.md.")
+    assert "no more than 350 words total" not in prompt
+    assert "Session Date:" in prompt
+
+
 def test_provider_legacy_snapshot_paths_are_ignored_before_validation() -> None:
     raw = json.dumps(
         {

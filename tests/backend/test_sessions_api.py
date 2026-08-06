@@ -15,8 +15,29 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         database_path=tmp_path / "state.sqlite3",
         workspace_path=tmp_path / "workspace",
+        system_prompt_path=tmp_path / "prompts" / "system_prompt.md",
         test_mode=True,
     )
+
+
+def test_system_prompt_is_saved_locally_and_survives_service_restart(tmp_path: Path) -> None:
+    app_settings = settings(tmp_path)
+
+    with TestClient(create_app(app_settings)) as client:
+        default_prompt = client.get("/api/system-prompt")
+        assert default_prompt.status_code == 200
+        assert "MM-DD-YYYY-short-name.extension" in default_prompt.json()["prompt"]
+        assert "session_record_markdown" in default_prompt.json()["locked_contract"]["properties"]
+
+        updated = client.put("/api/system-prompt", json={"prompt": "Always name files as YYYY-MM-DD-title.md."})
+        assert updated.status_code == 200
+        assert updated.json()["prompt"] == "Always name files as YYYY-MM-DD-title.md."
+        assert app_settings.system_prompt_path.read_text(encoding="utf-8") == "Always name files as YYYY-MM-DD-title.md.\n"
+
+    with TestClient(create_app(app_settings)) as restarted_client:
+        restored = restarted_client.get("/api/system-prompt")
+
+    assert restored.json()["prompt"] == "Always name files as YYYY-MM-DD-title.md."
 
 
 def make_recording(path: Path) -> None:

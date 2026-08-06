@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path.home() / "Library" / "Application Support" / "Vidscribe"
     database_path: Path | None = None
     workspace_path: Path | None = None
+    system_prompt_path: Path | None = None
     host: str = "127.0.0.1"
     port: int = 8000
     test_mode: bool = False
@@ -48,4 +49,6 @@ class Settings(BaseSettings):
             self.database_path = self.data_dir / "state.sqlite3"
         if self.workspace_path is None:
             self.workspace_path = self.data_dir / "sessions"
+        if self.system_prompt_path is None:
+            self.system_prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "system_prompt.md"
         return self

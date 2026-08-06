@@ -84,6 +84,23 @@ class PickerRequest(BaseModel):
     initial_path: str | None = None
 
 
+class SystemPromptUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1, max_length=100_000)
+
+    @model_validator(mode="after")
+    def prompt_is_not_blank(self) -> "SystemPromptUpdate":
+        if not self.prompt.strip():
+            raise ValueError("System prompt cannot be blank")
+        return self
+
+
+class SystemPromptView(BaseModel):
+    prompt: str
+    locked_contract: dict[str, object]
+
+
 class PickerSelection(BaseModel):
     selection_id: str
     path: str

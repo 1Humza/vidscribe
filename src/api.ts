@@ -11,6 +11,7 @@ import type {
   SessionViewDto,
   SourcePickerSelectionDto,
   ReviewUpdateDto,
+  SystemPromptDto,
 } from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -36,6 +37,18 @@ function postJson<T>(url: string, body: unknown): Promise<T> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+export function getSystemPrompt(): Promise<SystemPromptDto> {
+  return requestJson('/api/system-prompt');
+}
+
+export function updateSystemPrompt(prompt: string): Promise<SystemPromptDto> {
+  return requestJson('/api/system-prompt', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   });
 }
 

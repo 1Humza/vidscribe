@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { commitSession, createSession, executeSession, getSession, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, updateReview, type SessionEvent } from './api';
+import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, updateReview, updateSystemPrompt, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
+import SystemPromptModal from './components/SystemPromptModal';
 import type {
   AnalysisEffortDto,
   AnalysisModelDto,
@@ -75,6 +76,11 @@ export default function App() {
   const [isCommitting, setIsCommitting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeMentionPhrase, setActiveMentionPhrase] = useState<string | null>(null);
+  const [isSystemPromptOpen, setIsSystemPromptOpen] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [systemPromptContract, setSystemPromptContract] = useState<Record<string, unknown> | null>(null);
+  const [isSystemPromptLoading, setIsSystemPromptLoading] = useState(false);
+  const [isSystemPromptSaving, setIsSystemPromptSaving] = useState(false);
   const executeAbortRef = useRef<AbortController | null>(null);
   const reviewSaveQueueRef = useRef(Promise.resolve());
   const pendingReviewSavesRef = useRef(0);
@@ -318,6 +324,34 @@ export default function App() {
     }
   };
 
+  const openSystemPrompt = async () => {
+    setIsSystemPromptOpen(true);
+    setIsSystemPromptLoading(true);
+    try {
+      const savedPrompt = await getSystemPrompt();
+      setSystemPrompt(savedPrompt.prompt);
+      setSystemPromptContract(savedPrompt.locked_contract);
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The saved system prompt could not be loaded.'));
+    } finally {
+      setIsSystemPromptLoading(false);
+    }
+  };
+
+  const saveSystemPrompt = async (prompt: string) => {
+    setIsSystemPromptSaving(true);
+    try {
+      const savedPrompt = await updateSystemPrompt(prompt);
+      setSystemPrompt(savedPrompt.prompt);
+      setSystemPromptContract(savedPrompt.locked_contract);
+      setIsSystemPromptOpen(false);
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The system prompt could not be saved.'));
+    } finally {
+      setIsSystemPromptSaving(false);
+    }
+  };
+
   const saveReview = async (update: Parameters<typeof updateReview>[2], markdownVersion?: number) => {
     const attempt = session?.attempts.at(-1);
     if (!session || !attempt?.result) return;
@@ -395,6 +429,7 @@ export default function App() {
             pickerBusy={pickerBusy}
             context={context}
             setContext={setContext}
+            onEditSystemPrompt={() => void openSystemPrompt()}
             attachments={attachments}
             onSelectAttachments={selectAttachments}
             speakers={speakers}
@@ -490,6 +525,15 @@ export default function App() {
           </section>
         </div>
       </section>
+      <SystemPromptModal
+        isOpen={isSystemPromptOpen}
+        value={systemPrompt}
+        lockedContract={systemPromptContract}
+        isLoading={isSystemPromptLoading}
+        isSaving={isSystemPromptSaving}
+        onClose={() => setIsSystemPromptOpen(false)}
+        onSave={saveSystemPrompt}
+      />
     </div>
   );
 }

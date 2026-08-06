@@ -13,3 +13,6 @@ def test_settings_loads_local_api_keys_env_file(tmp_path: Path, monkeypatch) -> 
 
     assert settings.groq_api_key == "groq-test"
     assert settings.gemini_api_key == "gemini-test"
+    assert settings.system_prompt_path is not None
+    assert settings.system_prompt_path.name == "system_prompt.md"
+    assert settings.system_prompt_path.parent.name == "prompts"

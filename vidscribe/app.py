@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from vidscribe.analysis import Analyzer, DeterministicAnalyzer, GeminiAnalyzer
+from vidscribe.analysis import Analyzer, DEFAULT_SYSTEM_PROMPT, DeterministicAnalyzer, GeminiAnalyzer, analysis_response_json_schema
 from vidscribe.config import Settings
 from vidscribe.database import SessionRepository
 from vidscribe.fingerprints import source_fingerprint
@@ -23,12 +23,15 @@ from vidscribe.models import (
     ReviewUpdate,
     ResolvedSessionIntake,
     SessionView,
+    SystemPromptUpdate,
+    SystemPromptView,
 )
 from vidscribe.pickers import Picker, picker_for
 from vidscribe.pipeline import SessionPipeline
 from vidscribe.review import apply_review_update
 from vidscribe.selections import SelectionRegistry
 from vidscribe.session_dates import infer_session_date
+from vidscribe.prompts import SystemPromptStore
 from vidscribe.transcription import DeterministicTranscriber, GroqWhisperTranscriber, Transcriber
 
 
@@ -53,7 +56,7 @@ def create_app(
         CORSMiddleware,
         allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
     app.state.settings = app_settings
@@ -61,6 +64,10 @@ def create_app(
     app.state.picker = picker or picker_for(app_settings)
     selections = SelectionRegistry()
     app.state.selections = selections
+    assert app_settings.system_prompt_path is not None
+    app.state.system_prompt = SystemPromptStore(
+        app_settings.system_prompt_path, DEFAULT_SYSTEM_PROMPT
+    )
     active_transcriber = transcriber
     active_analyzer = analyzer
     if active_transcriber is None and app_settings.test_mode:
@@ -89,6 +96,7 @@ def create_app(
         or FFmpegMediaPreparer(app_settings.ffmpeg_path, app_settings.ffprobe_path),
         active_transcriber,
         active_analyzer,
+        system_prompt_provider=app.state.system_prompt.get,
     )
     app.state.pipeline = pipeline
     app.state.finalizer = finalizer or SessionFinalizer()
@@ -112,6 +120,21 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/system-prompt", response_model=SystemPromptView)
+    def get_system_prompt() -> SystemPromptView:
+        return SystemPromptView(
+            prompt=app.state.system_prompt.get(),
+            locked_contract=analysis_response_json_schema(),
+        )
+
+    @app.put("/api/system-prompt", response_model=SystemPromptView)
+    def update_system_prompt(request: SystemPromptUpdate) -> SystemPromptView:
+        try:
+            prompt = app.state.system_prompt.save(request.prompt)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return SystemPromptView(prompt=prompt, locked_contract=analysis_response_json_schema())
 
     @app.post("/api/sessions", response_model=SessionView, status_code=201)
     def create_session(request: CreateSessionRequest) -> SessionView:

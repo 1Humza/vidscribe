@@ -5,6 +5,11 @@ export interface ExtractionOptionsDto {
   highlights: boolean;
 }
 
+export interface SystemPromptDto {
+  prompt: string;
+  locked_contract: Record<string, unknown>;
+}
+
 export interface AnalysisResultDto {
   session_record_markdown: string;
   short_name: string;

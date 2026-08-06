@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { commitSession, createSession, executeSession, openCompletedSession, openSourceSession, pickCompletedSessionFolder } from './api';
+import { commitSession, createSession, executeSession, getSystemPrompt, openCompletedSession, openSourceSession, pickCompletedSessionFolder, updateSystemPrompt } from './api';
 
 function streamResponse(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -65,6 +65,27 @@ describe('createSession', () => {
         highlights: false,
       },
     });
+  });
+});
+
+describe('system prompts', () => {
+  it('loads and saves the locally persisted system prompt', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ prompt: 'Current rules', locked_contract: {} }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ prompt: 'New rules', locked_contract: {} }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getSystemPrompt()).resolves.toEqual({ prompt: 'Current rules', locked_contract: {} });
+    await expect(updateSystemPrompt('New rules')).resolves.toEqual({ prompt: 'New rules', locked_contract: {} });
+
+    expect(fetchMock.mock.calls).toEqual([
+      ['/api/system-prompt', undefined],
+      ['/api/system-prompt', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'New rules' }),
+      }],
+    ]);
   });
 });
 

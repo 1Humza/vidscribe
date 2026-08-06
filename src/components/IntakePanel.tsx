@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Server,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import type {
@@ -31,6 +32,7 @@ interface IntakePanelProps {
   pickerBusy: 'source' | 'destination' | null;
   context: string;
   setContext: (value: string) => void;
+  onEditSystemPrompt: () => void;
   attachments: SelectedAttachment[];
   onSelectAttachments: () => void;
   speakers: string;
@@ -183,17 +185,19 @@ export default function IntakePanel(props: IntakePanelProps) {
               <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">
                 Context and Instructions
               </h2>
-              <button
-                type="button"
-                aria-label="Attach reference files"
-                onClick={props.onSelectAttachments}
-                disabled={props.isProcessing}
-                className="flex items-center space-x-1 text-xs text-muted-canvas font-semibold uppercase cursor-pointer disabled:opacity-60"
-                title="Attach context files"
-              >
-                <Paperclip size={12} />
-                <span>Attach</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  aria-label="Attach reference files"
+                  onClick={props.onSelectAttachments}
+                  disabled={props.isProcessing}
+                  className="flex items-center space-x-1 text-xs text-muted-canvas font-semibold uppercase cursor-pointer disabled:opacity-60"
+                  title="Attach context files"
+                >
+                  <Paperclip size={12} />
+                  <span>Attach</span>
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -288,7 +292,20 @@ export default function IntakePanel(props: IntakePanelProps) {
 
         <div className="p-6 rounded-2xl bg-panel-canvas border border-muted-canvas shadow-xs space-y-6">
           <div className="space-y-3">
-            <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Extract</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Extract</h2>
+              <button
+                type="button"
+                aria-label="Edit System Prompt"
+                onClick={props.onEditSystemPrompt}
+                disabled={props.isProcessing}
+                className="flex items-center space-x-1 text-xs text-orange-600 dark:text-orange-400 font-semibold uppercase cursor-pointer disabled:opacity-60"
+                title="Edit the saved system prompt"
+              >
+                <SlidersHorizontal size={12} />
+                <span>System Prompt</span>
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {extractionTiles.map((tile) => {
                 const selected = props.extractionOptions[tile.key];

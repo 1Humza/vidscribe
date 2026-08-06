@@ -6,6 +6,7 @@ from typing import Iterator, Protocol
 from pydantic import BaseModel, Field
 
 from vidscribe.models import AnalysisResult, ExtractionOptions
+from vidscribe.prompts import default_system_prompt
 
 
 class AnalysisInput(BaseModel):
@@ -18,6 +19,11 @@ class AnalysisInput(BaseModel):
     source_media_has_video: bool = False
     model: str = ""
     effort: str = ""
+    system_prompt: str = ""
+
+
+DEFAULT_SYSTEM_PROMPT = """Create one evidence-grounded Vidscribe Analysis Result. The Markdown must begin with `📝 **{title}** · {MM-DD-YYYY}` and have this exact order: optional Input Context, Recall Brief, optional Highlights, Action Summary or Topics, optional Chapters, Snapshots, Transcript. Recall Brief, Snapshots, and Transcript are mandatory; Transcript is last. Selected top-level sections must be present even when empty, while unselected sections must be absent. Recall Brief must be hyper-concise distinct context at a glance: no introductory or generic summary sentence, only the useful details that make this Session recognizable.\n\nKeep naming consistent: use a short kebab-case session slug, and apply the completed-file formula `MM-DD-YYYY-short-name.extension`. When Action Summary is selected, it must be no more than 350 words total and repeat the record header first. Then use a channel-friendly layout: a Participants line when participants are known, followed by context-appropriate emoji-led discussion topics formatted as `[emoji] *Topic*`. Under each topic, use clear labeled prose or a short bullet list. Omit empty subsections. Never use checkbox or todo syntax. Include `🚧 *Blockers*` only when blockers genuinely exist. Include `🗓️ *Next Steps*` only when real follow-up exists, with one `**Owner** — action` line per owner. Never put a Recall Brief heading inside Action Summary.\n\nWhen Chapters are selected, start at `00:00` and write concise `MM:SS Chapter title` lines. Titles must be short, specific, and natural; capture actual topic shifts, bugs, fixes, design decisions, and action items. Merge silence or rambling into the nearest useful topic, use only actual transcript timestamps, and never invent details. Match the style `02:38 Giant hole / spawn issue`. Chapters require at least three ascending entries. Within Transcript, put each speaker turn and each Silence Marker on one line (single spaced). Write every silence exactly as `(Silence MM:SS)`. Require a new timestamped turn at natural pauses, completed thoughts, action/topic shifts, and changes in conversational cadence—even when the same speaker continues—so the transcript stays readable and time-anchored. Format every speaker turn exactly as `[HH:MM:SS] Speaker: `, for example `[01:42:48] Speaker: `. Do not split mechanically by a fixed duration; keep genuinely continuous speech together.\n\nSnapshots are automatic only when Source Media has video. Propose a Snapshot Cue only when speech explicitly points to useful visible information (a screen, setting, diagram, comparison, or demonstrated state). Never propose ordinary talking heads, vague references, purely verbal insights, decorative frames, or duplicate views. For each possible Snapshot, privately examine the immediately related sequence before and after the cue. A topic introduction, setup, or future intent is not a final rejection: scan forward for the earliest completion, reveal, or demonstrated result, then anchor at that result's first stable word. Merely naming a tool, object, or phrase such as 'this plugin is X' is an introduction, not a direct visible pointer; keep scanning. A direct visible pointer such as 'look here' or 'you can see' anchors immediately. For a completion/result cue, inspect slightly backward to find the beginning of that completed visible state, then anchor there before the screen can move on. If no nearby visual completion or direct pointer is present, do not propose a Snapshot. Return at most one `overview` Snapshot Cue when an early, stable, broad frame would clearly communicate what the session is about; it must meet the same visible-evidence standard. All other cues are `detail`. Each Snapshot Cue must include a concise subject, the exact supporting transcript phrase, the one exact anchor word within that phrase that best aligns with the visible reveal, and its speaker_label chosen exactly from speaker_labels. Return the anchor's zero-based canonical Whisper word index; never provide an approximate timestamp or filename.\n\nReturn mentions for any non-plain-English term or phrase: names, technical or domain terms, unknown terms, and words or phrases that seem low-confidence, nonsensical, or unusual in ordinary language. Include familiar terms too. Return each distinct mention only once, case-insensitively, with no leading or trailing punctuation. Each Mention is only its inclusive canonical word range and a speaker_label chosen exactly from speaker_labels. Input Context is server-owned and added after generation: do not output its heading, Extra Instructions, or Attached Context content anywhere in the Markdown. Report only filenames actually consulted in consulted_attachment_filenames. Use the attached Analysis Audio to correct speakers, names, terminology, and punctuation, but preserve every spoken passage from the complete Whisper Transcript. Never invent speech. Preserve deterministic Silence Markers. Return only the requested schema."""
+DEFAULT_SYSTEM_PROMPT = default_system_prompt()
 
 
 def analysis_response_json_schema() -> dict:
@@ -111,7 +117,20 @@ class GeminiAnalyzer:
                         pass
 
     def _prompt(self, analysis_input: AnalysisInput) -> str:
+        if analysis_input.system_prompt.strip():
+            return (
+                f"{analysis_input.system_prompt.strip()}\n\n"
+                f"Session Date: {analysis_input.session_date}\n\n"
+                f"Extraction Options:\n{analysis_input.extraction_options.model_dump_json()}\n\n"
+                f"Source Media has video: {json.dumps(analysis_input.source_media_has_video)}\n\n"
+                f"Timed Whisper Words ([zero-based index, start milliseconds, word]):\n{json.dumps(analysis_input.timed_words)}\n\n"
+                f"Extra Instructions:\n{analysis_input.extra_instructions or '(none)'}\n\n"
+                "Attached Context (use only when relevant; report only consulted filenames):\n"
+                f"{json.dumps(analysis_input.attached_context) if analysis_input.attached_context else '(none)'}\n\n"
+                "Use Timed Whisper Words as the complete spoken baseline; preserve every spoken passage in Transcript."
+            )
         return (
+            f"{DEFAULT_SYSTEM_PROMPT}\n\n"
             "Create one evidence-grounded Vidscribe Analysis Result. The Markdown must begin "
             "with `📝 **{title}** · {MM-DD-YYYY}` and have this exact order: optional Input Context, "
             "Recall Brief, optional Highlights, Action Summary or Topics, optional Chapters, Snapshots, Transcript. "

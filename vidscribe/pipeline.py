@@ -55,12 +55,14 @@ class SessionPipeline:
         media_preparer: FFmpegMediaPreparer,
         transcriber: Transcriber | None,
         analyzer: Analyzer | None,
+        system_prompt_provider=lambda: "",
     ):
         self.repository = repository
         self.workspace_path = workspace_path
         self.media_preparer = media_preparer
         self.transcriber = transcriber
         self.analyzer = analyzer
+        self.system_prompt_provider = system_prompt_provider
 
     def _has_reusable_preparation(self, session: SessionView) -> bool:
         if not session.analysis_audio_path or not session.transcript:
@@ -135,6 +137,7 @@ class SessionPipeline:
                 ),
                 model=session.model,
                 effort=session.effort,
+                system_prompt=self.system_prompt_provider(),
             )
             stream = iter(self.analyzer.stream(prepared, analysis_input))
             raw_stream = ""
