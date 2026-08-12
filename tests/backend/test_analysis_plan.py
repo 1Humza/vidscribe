@@ -15,11 +15,11 @@ from vidscribe.transcription import WordTiming
 def words() -> list[WordTiming]:
     return [
         WordTiming(word="First", start=0.0, end=0.4),
-        WordTiming(word="wierd", start=12.0, end=12.4),
-        WordTiming(word="phrase.", start=24.0, end=24.4),
-        WordTiming(word="Middle.", start=36.0, end=36.4),
-        WordTiming(word="Close.", start=48.0, end=48.4),
-        WordTiming(word="Done.", start=60.0, end=60.4),
+        WordTiming(word="wierd", start=9.7, end=9.9),
+        WordTiming(word="phrase.", start=10.0, end=10.4),
+        WordTiming(word="Middle.", start=19.7, end=19.9),
+        WordTiming(word="Close.", start=20.0, end=20.4),
+        WordTiming(word="Done.", start=30.0, end=30.4),
     ]
 
 
@@ -64,12 +64,28 @@ def test_server_renders_transcript_and_chapters_from_canonical_word_times() -> N
 
     record = result.session_record_markdown
     assert "00:00 Opening" in record
-    assert "00:24 Correction" in record
-    assert "00:48 Close" in record
+    assert "00:10 Correction" in record
+    assert "00:20 Close" in record
     assert "[00:00] Ada: First corrected phrase. Middle. Close. Done." in record
-    assert "[00:12] Ada: Corrected terminology — \"corrected phrase.\"" in record
+    assert "[00:09] Ada: Corrected terminology — \"corrected phrase.\"" in record
     assert "15:47" not in record
     assert result.mentions[0].replacement == "corrected phrase."
+
+
+def test_server_renders_ten_second_silence_markers_on_single_lines() -> None:
+    payload = plan_payload()
+    payload.update({"turns": [{"s": 0, "e": 1, "p": 0}], "edits": [], "chapters": [], "highlights": [], "mentions": []})
+    result = render_analysis_plan(
+        AnalysisPlan.model_validate(payload),
+        [
+            WordTiming(word="Before", start=0.0, end=0.5),
+            WordTiming(word="After", start=10.5, end=11.0),
+        ],
+        ExtractionOptions(chapters=False),
+        source_media_has_video=False,
+    )
+
+    assert "## Transcript\n\n[00:00] Ada: Before\n(Silence 00:10)\n[00:10] Ada: After" in result.session_record_markdown
 
 
 def test_plan_rejects_out_of_range_or_incomplete_transcript_references() -> None:

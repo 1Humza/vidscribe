@@ -20,20 +20,20 @@ def test_complete_transcript_keeps_speech_after_long_pause_and_marks_silence() -
         text="Before After",
         words=[
             WordTiming(word="Before", start=0.1, end=0.6),
-            WordTiming(word="After", start=17.1, end=17.6),
+            WordTiming(word="After", start=10.6, end=11.1),
         ],
         segments=[
             SegmentTiming(text="Before", start=0.1, end=0.6),
-            SegmentTiming(text="After", start=17.1, end=17.6),
+            SegmentTiming(text="After", start=10.6, end=11.1),
         ],
     )
 
     transcript = TranscriptFormatter().format(transcription)
 
     assert transcript == (
-        "[00:00] Speaker 1: Before\n\n"
-        "(Silence 00:16)\n\n"
-        "[00:17] Speaker 1: After"
+        "[00:00] Speaker 1: Before\n"
+        "(Silence 00:10)\n"
+        "[00:10] Speaker 1: After"
     )
 
 
@@ -42,19 +42,19 @@ def test_word_chronology_splits_a_provider_segment_that_spans_long_silence() -> 
         text="Before After",
         words=[
             WordTiming(word="Before", start=0.1, end=0.6),
-            WordTiming(word="After", start=17.1, end=17.6),
+            WordTiming(word="After", start=10.6, end=11.1),
         ],
         segments=[
-            SegmentTiming(text="Before After", start=0.1, end=17.6),
+            SegmentTiming(text="Before After", start=0.1, end=11.1),
         ],
     )
 
     transcript = TranscriptFormatter().format(transcription)
 
     assert transcript == (
-        "[00:00] Speaker 1: Before\n\n"
-        "(Silence 00:16)\n\n"
-        "[00:17] Speaker 1: After"
+        "[00:00] Speaker 1: Before\n"
+        "(Silence 00:10)\n"
+        "[00:10] Speaker 1: After"
     )
 
 

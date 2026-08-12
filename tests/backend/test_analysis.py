@@ -12,6 +12,7 @@ from vidscribe.analysis import (
     parse_provider_analysis_result,
 )
 from vidscribe.models import AnalysisResult, ExtractionOptions
+from vidscribe.prompts import default_system_prompt
 from vidscribe.session_record import normalize_session_record_headings, validate_session_record
 
 
@@ -40,6 +41,13 @@ class FakeModels:
         yield SimpleNamespace(
             text='"short_name":"Demo Sync","session_date":"07-31-2026","speaker_labels":["Speaker 1"]}'
         )
+
+
+def test_snapshot_prompt_prioritizes_visible_deictic_anchor_words() -> None:
+    prompt = default_system_prompt()
+
+    assert "Anchor selection order:" in prompt
+    assert "Use a subject noun only when a direct cue does not exist." in prompt
 
 
 def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
@@ -78,8 +86,10 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     assert "Never use checkbox or todo syntax" in request["contents"][0]
     assert "Never calculate or return time" in request["contents"][0]
     assert "do not repeat unchanged speech" in request["contents"][0]
-    assert "major navigational segments" in request["contents"][0]
+    assert "identify ALL navigational segments" in request["contents"][0]
     assert "scan forward to the earliest visible completion" in request["contents"][0]
+    assert "Anchor selection order:" in request["contents"][0]
+    assert "Use a subject noun only when a direct cue does not exist." in request["contents"][0]
     assert "Return every distinct mention once" in request["contents"][0]
     assert "Return only the requested AnalysisPlan JSON object" in request["contents"][0]
     assert request["contents"][1].uri == "files/audio"

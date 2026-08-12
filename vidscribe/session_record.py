@@ -7,7 +7,7 @@ from vidscribe.models import (
     Mention,
 )
 from vidscribe.snapshots import SnapshotCue
-from vidscribe.transcription import WordTiming
+from vidscribe.transcription import SILENCE_THRESHOLD_SECONDS, WordTiming
 
 
 _SECTION_NAMES = (
@@ -140,7 +140,7 @@ def _render_transcript(plan: AnalysisPlan, words: list[WordTiming], tokens: list
         speaker = _speaker_label(turn.speaker_index, plan.speaker_labels, "Transcript turn")
         start = turn.source_word_start
         for index in range(turn.source_word_start + 1, turn.source_word_end + 1):
-            if words[index].start - words[index - 1].end >= 15:
+            if words[index].start - words[index - 1].end >= SILENCE_THRESHOLD_SECONDS:
                 text = _word_text(tokens[start:index])
                 if text:
                     lines.append(f"[{_clock(words[start].start)}] {speaker}: {text}")
@@ -149,7 +149,7 @@ def _render_transcript(plan: AnalysisPlan, words: list[WordTiming], tokens: list
         text = _word_text(tokens[start : turn.source_word_end + 1])
         if text:
             lines.append(f"[{_clock(words[start].start)}] {speaker}: {text}")
-    return "\n\n".join(lines)
+    return "\n".join(lines)
 
 
 def render_analysis_plan(

@@ -17,7 +17,7 @@ The complete spoken record of a Session with a timestamp at each speaker turn an
 _Avoid_: Summary, notes
 
 **Silence Marker**:
-A standalone transcript line derived from Whisper word timing for a pause of at least 15 seconds, formatted as `(Silence MM:SS)`. Gemini does not decide whether a shorter pause qualifies.
+A standalone transcript line derived from Whisper word timing for a pause of at least 10 seconds, formatted as `(Silence MM:SS)`. Gemini does not decide whether a shorter pause qualifies.
 _Avoid_: Treating silence as the end of a Session, timestamp gap, model-estimated pause
 
 **Speaker Label**:
