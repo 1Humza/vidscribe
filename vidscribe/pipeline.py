@@ -8,8 +8,8 @@ from pydantic import ValidationError
 from vidscribe.analysis import AnalysisInput, Analyzer, parse_provider_analysis_result
 from vidscribe.database import SessionRepository
 from vidscribe.media import FFmpegMediaPreparer
-from vidscribe.models import AnalysisResult, SessionView
-from vidscribe.session_record import normalize_session_record_headings, validate_session_record
+from vidscribe.models import AnalysisPlan, SessionView
+from vidscribe.session_record import render_analysis_plan, validate_session_record
 from vidscribe.snapshots import (
     FFmpegSnapshotExtractor,
     SnapshotError,
@@ -128,8 +128,8 @@ class SessionPipeline:
                 extraction_options=session.extraction_options,
                 session_date=session.session_date.isoformat(),
                 attached_context=_read_attached_context(session.attachment_paths),
-                timed_words=[
-                    (index, round(float(word["start"]) * 1000), str(word["word"]))
+                source_words=[
+                    (index, str(word["word"]))
                     for index, word in enumerate(session.transcript_word_timings)
                 ],
                 source_media_has_video=source_has_video(
@@ -157,16 +157,26 @@ class SessionPipeline:
                         "raw_stream": raw_stream,
                     },
                 )
-            result = parse_provider_analysis_result(raw_stream)
-            if any(
-                mention.source_word_end >= len(session.transcript_word_timings)
-                for mention in result.mentions
-            ):
-                raise ValueError("Mention exceeds canonical Whisper word range")
             media_is_video = analysis_input.source_media_has_video
-            result.source_media_has_video = media_is_video
+            words = [WordTiming.model_validate(word) for word in session.transcript_word_timings]
+            provider_result = parse_provider_analysis_result(raw_stream)
+            if isinstance(provider_result, AnalysisPlan):
+                provider_result = provider_result.model_copy(
+                    update={"session_date": session.session_date.strftime("%m-%d-%Y")}
+                )
+                result = render_analysis_plan(
+                    provider_result,
+                    words,
+                    session.extraction_options,
+                    source_media_has_video=media_is_video,
+                )
+            else:
+                # Existing unfinished Sessions retain their old provider result format.
+                result = provider_result
+                if any(mention.source_word_end >= len(words) for mention in result.mentions):
+                    raise ValueError("Mention exceeds canonical Whisper word range")
+                result.source_media_has_video = media_is_video
             if media_is_video:
-                words = [WordTiming.model_validate(word) for word in session.transcript_word_timings]
                 result.snapshots = materialize_snapshot_proposals(
                     result.snapshot_cues,
                     words,
@@ -184,9 +194,6 @@ class SessionPipeline:
                 session.extra_instructions,
                 session.attachment_paths,
                 result.consulted_attachment_filenames,
-            )
-            result.session_record_markdown = normalize_session_record_headings(
-                result.session_record_markdown
             )
             result.session_record_markdown = render_snapshot_section(
                 result.session_record_markdown, media_is_video, result.snapshots

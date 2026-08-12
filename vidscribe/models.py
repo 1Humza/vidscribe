@@ -108,6 +108,72 @@ class PickerSelection(BaseModel):
     media_kind: Literal["audio", "video"] | None = None
 
 
+class SourceRange(BaseModel):
+    """An inclusive range in the immutable canonical Whisper word stream."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    source_word_start: int = Field(ge=0, alias="s")
+    source_word_end: int = Field(ge=0, alias="e")
+
+    @model_validator(mode="after")
+    def range_is_ascending(self) -> "SourceRange":
+        if self.source_word_end < self.source_word_start:
+            raise ValueError("Source range end must not precede its start")
+        return self
+
+
+class TranscriptTurn(SourceRange):
+    speaker_index: int = Field(ge=0, alias="p")
+
+
+class TranscriptEdit(SourceRange):
+    text: str = Field(min_length=1)
+
+
+class Chapter(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    anchor_word_index: int = Field(ge=0, alias="i")
+    title: str = Field(min_length=1, max_length=100)
+
+
+class Highlight(SourceRange):
+    label: str = Field(min_length=1, max_length=160)
+
+
+class MentionSelection(SourceRange):
+    speaker_index: int = Field(ge=0, alias="p")
+
+
+class SnapshotSelection(SourceRange):
+    anchor_word_index: int = Field(ge=0, alias="i")
+    speaker_index: int = Field(ge=0, alias="p")
+    subject: str = Field(min_length=1, max_length=80)
+    kind: Literal["overview", "detail"] = "detail"
+
+
+class AnalysisPlan(BaseModel):
+    """Compact provider contract; the server renders all time-bearing output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    short_name: str = Field(min_length=1)
+    # Session Date is intake-owned; provider dates are ignored by the renderer.
+    session_date: str = ""
+    speaker_labels: list[str] = Field(min_length=1)
+    recall_brief: str = Field(min_length=1)
+    turns: list[TranscriptTurn]
+    edits: list[TranscriptEdit] = Field(default_factory=list)
+    action_summary: str = ""
+    topics: str = ""
+    chapters: list[Chapter] = Field(default_factory=list)
+    highlights: list[Highlight] = Field(default_factory=list)
+    snapshot_cues: list[SnapshotSelection] = Field(default_factory=list)
+    mentions: list[MentionSelection] = Field(default_factory=list)
+    consulted_attachment_filenames: list[str] = Field(default_factory=list)
+
+
 class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

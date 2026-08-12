@@ -26,8 +26,9 @@ def test_system_prompt_is_saved_locally_and_survives_service_restart(tmp_path: P
     with TestClient(create_app(app_settings)) as client:
         default_prompt = client.get("/api/system-prompt")
         assert default_prompt.status_code == 200
-        assert "MM-DD-YYYY-short-name.extension" in default_prompt.json()["prompt"]
-        assert "session_record_markdown" in default_prompt.json()["locked_contract"]["properties"]
+        assert "semantic editor" in default_prompt.json()["prompt"]
+        assert "turns" in default_prompt.json()["locked_contract"]["properties"]
+        assert "session_record_markdown" not in default_prompt.json()["locked_contract"]["properties"]
 
         updated = client.put("/api/system-prompt", json={"prompt": "Always name files as YYYY-MM-DD-title.md."})
         assert updated.status_code == 200
