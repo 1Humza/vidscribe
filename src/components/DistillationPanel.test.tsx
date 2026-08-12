@@ -2,7 +2,10 @@ import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import DistillationPanel from './DistillationPanel';
 
-it('highlights every selected mention in rich review without a document navigation target', () => {
+it('keeps Raw review active and selects the complete matching transcript turn', () => {
+  const scrollIntoView = vi.fn();
+  const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
   const view = render(
     <DistillationPanel
       result={{ title: 'Door demo', timestamp: 'Jun 25, 2026', markdown: '', speakers: [], mentions: [], agentNotes: [], filesystem: [], snapshots: [] }}
@@ -21,6 +24,11 @@ it('highlights every selected mention in rich review without a document navigati
     />,
   );
 
-  expect(screen.getByRole('button', { name: 'RICH' })).toHaveClass('bg-panel-canvas');
-  expect(view.container.querySelectorAll('[data-mention-highlight="true"]')).toHaveLength(3);
+  expect(screen.getByRole('button', { name: 'RAW' })).toHaveClass('bg-panel-canvas');
+  const editor = screen.getByLabelText('Session Record Markdown') as HTMLTextAreaElement;
+  expect(editor.value.slice(editor.selectionStart, editor.selectionEnd)).toBe('Slab is ready. The slab is visible.');
+  expect(view.container.querySelectorAll('[data-mention-highlight="true"]')).toHaveLength(0);
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  if (originalDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalDescriptor);
+  else delete (HTMLElement.prototype as { scrollIntoView?: () => void }).scrollIntoView;
 });

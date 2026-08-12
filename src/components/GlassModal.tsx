@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 
@@ -31,16 +31,44 @@ const sizeClasses = {
 };
 
 export default function GlassModal({ isOpen, onClose, title, children, size = 'lg', minimal = false }: GlassModalProps) {
+  const backdropPointerId = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          onPointerDownCapture={(event) => {
+            backdropPointerId.current = (event.target as HTMLElement).dataset.modalBackdrop === 'true'
+              ? event.pointerId
+              : null;
+          }}
+          onPointerUpCapture={(event) => {
+            const completedOnBackdrop = (event.target as HTMLElement).dataset.modalBackdrop === 'true';
+            if (backdropPointerId.current === event.pointerId && completedOnBackdrop) onClose();
+            backdropPointerId.current = null;
+          }}
+          onPointerCancelCapture={() => {
+            backdropPointerId.current = null;
+          }}
+        >
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            data-modal-backdrop="true"
             className="absolute inset-0 bg-black/45 dark:bg-black/75 backdrop-blur-sm"
           />
 
@@ -50,9 +78,6 @@ export default function GlassModal({ isOpen, onClose, title, children, size = 'l
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-            onClick={(event) => {
-              if (minimal && event.target === event.currentTarget) onClose();
-            }}
             className={`relative w-full ${sizeClasses[size]} z-10 ${minimal ? '' : 'overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas p-5 shadow-xl'}`}
           >
             {!minimal && (

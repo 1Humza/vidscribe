@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -70,8 +71,10 @@ function isoDate(sessionDate: string): string {
 export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [activeSnapshotFilename, setActiveSnapshotFilename] = useState<string | null>(null);
+  const [hoveredSnapshot, setHoveredSnapshot] = useState<{ filename: string; left: number; top: number; width: number; height: number } | null>(null);
   const [editingMention, setEditingMention] = useState<string | null>(null);
   const [hoveredMention, setHoveredMention] = useState<string | null>(null);
+  const [hoveredMentionPosition, setHoveredMentionPosition] = useState<{ left: number; top: number } | null>(null);
   const [fsExpanded, setFsExpanded] = useState<Record<string, boolean>>({
     root: true,
     assets: true,
@@ -83,6 +86,35 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
   const activeSnapshotIndex = activeSnapshotFilename
     ? snapshots.findIndex((snapshot) => snapshot.filename === activeSnapshotFilename)
     : -1;
+  const hoveredSnapshotData = snapshots.find((snapshot) => snapshot.filename === hoveredSnapshot?.filename) ?? null;
+
+  const isWithinSnapshotHover = (target: EventTarget | null) => (
+    target instanceof HTMLElement
+    && Boolean(target.closest('[data-snapshot-card], [data-snapshot-hover-preview]'))
+  );
+
+  const showSnapshotHover = (snapshot: ReviewSnapshot, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    onMentionSelect(snapshot.cuePhrase || snapshot.anchorWord || null);
+    setHoveredSnapshot({
+      filename: snapshot.filename,
+      left: rect.left - rect.width * 0.25,
+      top: rect.top - rect.height * 0.25,
+      width: rect.width * 1.5,
+      height: rect.height * 1.5,
+    });
+  };
+
+  const showMentionHover = (mentionId: string, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    setHoveredMention(mentionId);
+    setHoveredMentionPosition({ left: rect.left, top: Math.max(8, rect.top - 6) });
+  };
+
+  useEffect(() => {
+    if (!activeSnapshot) return;
+    onMentionSelect(activeSnapshot.cuePhrase || activeSnapshot.anchorWord || null);
+  }, [activeSnapshot, onMentionSelect]);
 
   useEffect(() => {
     if (activeSnapshotIndex === -1 || snapshots.length < 2) return;
@@ -348,10 +380,16 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                     <div
                       key={mention.id}
                       className="relative"
-                      onMouseEnter={() => setHoveredMention(mention.id)}
-                      onMouseLeave={() => setHoveredMention(null)}
-                      onFocus={() => setHoveredMention(mention.id)}
-                      onBlur={() => setHoveredMention(null)}
+                      onMouseEnter={(event) => showMentionHover(mention.id, event.currentTarget)}
+                      onMouseLeave={() => {
+                        setHoveredMention(null);
+                        setHoveredMentionPosition(null);
+                      }}
+                      onFocus={(event) => showMentionHover(mention.id, event.currentTarget)}
+                      onBlur={() => {
+                        setHoveredMention(null);
+                        setHoveredMentionPosition(null);
+                      }}
                     >
                       <button
                         type="button"
@@ -364,15 +402,6 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                       >
                         {mention.tag}
                       </button>
-                      {hoveredMention === mention.id && (
-                        <div
-                          role="tooltip"
-                          className="pointer-events-none absolute z-20 bottom-full left-0 mb-1.5 w-64 rounded border border-muted-canvas bg-panel-canvas px-2.5 py-2 text-left shadow-lg"
-                        >
-                          <div className="mb-1 font-mono text-[9px] font-bold uppercase tracking-wider text-orange-500">{mention.time} — {mention.speakerLabel}</div>
-                          <p className="text-[11px] leading-relaxed text-main-canvas">{mention.context}</p>
-                        </div>
-                      )}
                     </div>
                   )
                 ))}
@@ -411,6 +440,14 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                       layout
                       initial={false}
                       transition={{ duration: 0.18, ease: 'easeOut' }}
+                      data-snapshot-card="true"
+                      onPointerEnter={(event) => showSnapshotHover(snapshot, event.currentTarget)}
+                      onPointerLeave={(event) => {
+                        if (!isWithinSnapshotHover(event.relatedTarget)) {
+                          setHoveredSnapshot(null);
+                          if (!activeSnapshot) onMentionSelect(null);
+                        }
+                      }}
                       className={`group relative aspect-[16/10] rounded border transition-[border-color,box-shadow] duration-200 overflow-hidden cursor-pointer text-left ${!snapshot.kept ? 'border-muted-canvas bg-input-canvas/30' : 'border-muted-canvas bg-input-canvas/30 hover:border-active-canvas'}`}
                     >
                       <button type="button" onClick={() => setActiveSnapshotFilename(snapshot.filename)} className="absolute inset-0 w-full text-left">
@@ -581,6 +618,71 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
           </div>
         )}
       </GlassModal>
+
+      {hoveredSnapshot && hoveredSnapshotData && typeof document !== 'undefined' && createPortal(
+        <div
+          data-snapshot-hover-preview="true"
+          onPointerLeave={(event) => {
+            if (!isWithinSnapshotHover(event.relatedTarget)) {
+              setHoveredSnapshot(null);
+              if (!activeSnapshot) onMentionSelect(null);
+            }
+          }}
+          style={{ left: hoveredSnapshot.left, top: hoveredSnapshot.top, width: hoveredSnapshot.width, height: hoveredSnapshot.height }}
+          className="fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
+        >
+          <button type="button" onClick={() => setActiveSnapshotFilename(hoveredSnapshotData.filename)} className="absolute inset-0 w-full text-left">
+            {hoveredSnapshotData.imageUrl ? (
+              <img
+                src={hoveredSnapshotData.imageUrl}
+                alt={hoveredSnapshotData.filename}
+                referrerPolicy="no-referrer"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center text-muted-canvas">
+                <Image size={21} />
+              </div>
+            )}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-3 py-3 pt-9 text-white">
+              <div className="flex items-center gap-1.5 text-xs font-mono text-white/80">
+                <span>{hoveredSnapshotData.time}</span>
+                {hoveredSnapshotData.kind === 'overview' && <span className="rounded bg-white/15 px-1 uppercase">Overview</span>}
+              </div>
+              <div className={`truncate text-base font-medium ${!hoveredSnapshotData.kept ? 'line-through text-white/60' : ''}`}>{hoveredSnapshotData.subject}</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            disabled={isReadOnly}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSnapshotKeep(hoveredSnapshotData.filename, !hoveredSnapshotData.kept);
+            }}
+            aria-label={`${hoveredSnapshotData.kept ? 'Remove' : 'Keep'} ${hoveredSnapshotData.filename}`}
+            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white/80 hover:bg-black/80 hover:text-white disabled:cursor-not-allowed"
+          >
+            {hoveredSnapshotData.kept ? <X size={16} /> : <Plus size={16} />}
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {hoveredMention && hoveredMentionPosition && typeof document !== 'undefined' && (() => {
+        const mention = result?.mentions.find((item) => item.id === hoveredMention);
+        if (!mention) return null;
+        return createPortal(
+          <div
+            role="tooltip"
+            style={{ left: hoveredMentionPosition.left, top: hoveredMentionPosition.top }}
+            className="pointer-events-none fixed z-[55] w-64 -translate-y-full rounded border border-muted-canvas bg-panel-canvas px-2.5 py-2 text-left shadow-lg"
+          >
+            <div className="mb-1 font-mono text-[9px] font-bold uppercase tracking-wider text-orange-500">{mention.time} — {mention.speakerLabel}</div>
+            <p className="text-[11px] leading-relaxed text-main-canvas">{mention.context}</p>
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }

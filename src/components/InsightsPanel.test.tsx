@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import InsightsPanel from './InsightsPanel';
@@ -47,7 +47,7 @@ it('allows Final Review to remove a proposed Snapshot', async () => {
   await user.click(screen.getByRole('button', { name: 'Remove 01-door-status.jpg' }));
 
   expect(onSnapshotKeep).toHaveBeenCalledWith('01-door-status.jpg', false);
-  await user.click(screen.getByRole('button', { name: '01-door-status.jpg 00:01 door status' }));
+  await user.click(within(view.container).getByRole('button', { name: '01-door-status.jpg 00:01 door status' }));
   expect(screen.getByLabelText('Snapshot evidence')).toHaveTextContent('see this door');
   expect(screen.getByText('1 / 1')).toBeInTheDocument();
   expect(screen.getByLabelText('Snapshot 1 of 1').parentElement).toHaveTextContent('1 / 1');
@@ -97,8 +97,10 @@ it('shows mention context immediately and marks the Snapshot anchor', async () =
 
   const query = within(view.container);
   await user.hover(query.getByRole('button', { name: 'Slab' }));
-  expect(query.getByRole('tooltip')).toHaveTextContent('02:10 — Developer');
-  expect(query.getByRole('tooltip')).toHaveTextContent('I am going to rename it Slab now');
+  const tooltip = screen.getAllByRole('tooltip').at(-1)!;
+  expect(tooltip).toHaveClass('fixed');
+  expect(tooltip).toHaveTextContent('02:10 — Developer');
+  expect(tooltip).toHaveTextContent('I am going to rename it Slab now');
   await user.click(query.getByRole('button', { name: 'Preview Snapshots' }));
   expect(query.getByLabelText('Snapshot evidence').querySelector('strong')).toHaveTextContent('Slab');
 });
@@ -127,6 +129,39 @@ it('cycles the bare snapshot viewer with arrow keys', async () => {
   await user.keyboard('{ArrowRight}');
   expect(query.getByLabelText('Snapshot evidence')).toHaveTextContent('here is the lock detail');
   expect(query.getByText('2 / 2')).toBeInTheDocument();
+});
+
+it('renders an unclipped 1.5× snapshot hover layer and selects its transcript cue', async () => {
+  const onMentionSelect = vi.fn();
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [], mentions: [], agentNotes: [], filesystem: [],
+        snapshots: [{ filename: '01-door.jpg', time: '00:10', subject: 'Door detail', cuePhrase: 'look at this door', anchorWord: 'door', speakerLabel: 'Developer', kind: 'detail', kept: true }],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const snapshotButton = within(view.container).getByRole('button', { name: '00:10 Door detail' });
+  const snapshotCard = snapshotButton.closest<HTMLElement>('[data-snapshot-card]');
+  expect(snapshotCard).not.toBeNull();
+  Object.defineProperty(snapshotCard!, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ left: 100, top: 200, width: 80, height: 50 }),
+  });
+  fireEvent.pointerEnter(snapshotCard!);
+  const hoverPreview = Array.from(document.querySelectorAll<HTMLElement>('[data-snapshot-hover-preview="true"]')).at(-1);
+  expect(hoverPreview).not.toBeNull();
+  expect(hoverPreview).toHaveStyle({ left: '80px', top: '187.5px', width: '120px', height: '75px' });
+  expect(hoverPreview).toHaveClass('fixed');
+  expect(onMentionSelect).toHaveBeenCalledWith('look at this door');
+
+  await user.click(snapshotButton);
+  expect(onMentionSelect).toHaveBeenCalledWith('look at this door');
 });
 
 it('applies one mention correction to every grouped source range', async () => {

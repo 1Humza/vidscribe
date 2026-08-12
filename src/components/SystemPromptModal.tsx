@@ -39,10 +39,8 @@ export default function SystemPromptModal({ isOpen, value, lockedContract, isLoa
   return (
     <GlassModal isOpen={isOpen} onClose={onClose} title="System prompt" size="full" minimal>
       <div
+        data-modal-backdrop="true"
         className="relative mx-auto h-[82vh] w-full"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }}
       >
         <section className="mx-auto flex h-full w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-muted-canvas bg-panel-canvas shadow-2xl">
           <header className="flex items-center justify-between gap-5 px-6 py-4">

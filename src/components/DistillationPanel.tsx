@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Copy,
   Check,
@@ -70,6 +70,8 @@ export default function DistillationPanel({
 }: DistillationPanelProps) {
   const [viewMode, setViewMode] = useState<'rich' | 'raw'>('raw');
   const [copied, setCopied] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const markdownEditorRef = useRef<HTMLTextAreaElement>(null);
   const previewForDisplay = previewText.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n');
   const stageMessage = {
     intake: 'Waiting for a Session to start.',
@@ -102,12 +104,32 @@ export default function DistillationPanel({
   };
 
   useEffect(() => {
-    if (highlightPhrase) setViewMode('rich');
-  }, [highlightPhrase]);
+    if (!highlightPhrase || viewMode !== 'rich') return;
+    const highlightedTurn = contentRef.current
+      ?.querySelector<HTMLElement>('[data-mention-highlight="true"]');
+    highlightedTurn?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [highlightPhrase, markdownText, viewMode]);
 
-  const highlightText = (text: string): React.ReactNode => {
+  useEffect(() => {
+    if (!highlightPhrase || viewMode !== 'raw') return;
+    const editor = markdownEditorRef.current;
+    const transcriptHeading = /^#{1,6}\s+Transcript\b.*$/im.exec(markdownText);
+    const transcriptStart = transcriptHeading ? transcriptHeading.index + transcriptHeading[0].length : 0;
+    const phraseStart = markdownText.toLocaleLowerCase().indexOf(highlightPhrase.toLocaleLowerCase(), transcriptStart);
+    if (!editor || phraseStart === -1) return;
+    const turnStart = markdownText.lastIndexOf('\n', phraseStart) + 1;
+    const turnEnd = markdownText.indexOf('\n', phraseStart);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(turnStart, turnEnd === -1 ? markdownText.length : turnEnd);
+    editor.scrollTop = Math.max(0, editor.scrollTop + editor.selectionStart / Math.max(1, markdownText.length) * editor.scrollHeight - editor.clientHeight / 2);
+  }, [highlightPhrase, markdownText, viewMode]);
+
+  const highlightText = (text: string, shouldHighlight = true): React.ReactNode => {
     const phrase = highlightPhrase?.trim();
-    if (!phrase) return text;
+    if (!phrase || !shouldHighlight) return text;
+    if (text.toLocaleLowerCase().includes(phrase.toLocaleLowerCase())) {
+      return <mark data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{text}</mark>;
+    }
     const expression = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
     return text.split(expression).map((part, index) => (
       index % 2 === 1
@@ -132,9 +154,12 @@ export default function DistillationPanel({
     const lines = cleanedMd.split('\n');
     let inQuote = false;
     let quoteLines: string[] = [];
+    let inTranscript = false;
 
     const renderedElements = lines.map((line, idx) => {
       const trimmed = line.trim();
+
+      if (/^#{1,6}\s+Transcript\b/i.test(trimmed)) inTranscript = true;
 
       // Blockquote handler
       if (trimmed.startsWith('>')) {
@@ -210,7 +235,7 @@ export default function DistillationPanel({
             <span className={`text-sm font-sans leading-relaxed transition-all ${
               isChecked ? 'text-muted-canvas line-through' : 'text-main-canvas'
             }`}>
-              {highlightText(typeof renderedText === 'string' ? renderedText : text)}
+              {highlightText(typeof renderedText === 'string' ? renderedText : text, inTranscript)}
             </span>
           </div>
         );
@@ -222,7 +247,7 @@ export default function DistillationPanel({
         return (
           <li key={idx} className="list-none flex items-start space-x-2 my-2 text-sm text-muted-canvas pl-0.5">
             <span className="mt-2 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-muted-canvas" />
-            <span>{highlightText(text)}</span>
+            <span>{highlightText(text, inTranscript)}</span>
           </li>
         );
       }
@@ -235,14 +260,14 @@ export default function DistillationPanel({
           return (
             <div key={idx} className="flex items-start space-x-2.5 my-2.5 text-sm text-muted-canvas font-sans pl-0.5">
               <span className="font-mono text-main-canvas text-xs font-semibold">{matchNumber[1]}.</span>
-              <span>{highlightText(matchNumber[2])}</span>
+              <span>{highlightText(matchNumber[2], inTranscript)}</span>
             </div>
           );
         }
 
         return (
           <p key={idx} className="text-sm text-muted-canvas font-sans leading-relaxed my-2.5">
-            {highlightText(trimmed)}
+            {highlightText(trimmed, inTranscript)}
           </p>
         );
       }
@@ -332,7 +357,7 @@ export default function DistillationPanel({
       </div>
 
       {/* Content Container */}
-      <div className="flex-1 overflow-y-auto p-4 min-h-[300px]">
+      <div ref={contentRef} className="flex-1 overflow-y-auto p-4 min-h-[300px]">
         {previewText && !result ? (
           <div className="relative h-full">
             <div className="mb-4 p-2.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-mono uppercase tracking-wider flex items-center justify-between select-none">
@@ -396,6 +421,7 @@ export default function DistillationPanel({
               <div className="relative">
                 <textarea
                   aria-label="Session Record Markdown"
+                  ref={markdownEditorRef}
                   value={markdownText}
                   onChange={(event) => setMarkdownText(event.target.value)}
                   onBlur={onSaveMarkdown}
