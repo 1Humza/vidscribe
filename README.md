@@ -13,11 +13,22 @@ Final Review.
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
 npm install
-cp .env.example .env
 ```
 
-Set `GROQ_API_KEY` and `GEMINI_API_KEY` in `.env`, then run the service and UI
-in separate terminals:
+Put `GROQ_API_KEY` and `GEMINI_API_KEY` in the shared user-level credentials
+file below. This location is outside the repository, so it is available from
+every git worktree:
+
+```bash
+mkdir -p ~/.config/vidscribe
+cp .env.example ~/.config/vidscribe/api_keys.env
+$EDITOR ~/.config/vidscribe/api_keys.env
+chmod 600 ~/.config/vidscribe/api_keys.env
+```
+
+The service also accepts shell environment variables and the repository-local
+`.env` or `api_keys.env` files; those are useful for isolated development and
+tests. Run the service and UI in separate terminals:
 
 ```bash
 .venv/bin/python -m vidscribe

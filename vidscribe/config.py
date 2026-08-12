@@ -4,13 +4,26 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _env_files() -> tuple[str, ...]:
+    """Return credential files shared by all worktrees plus local overrides."""
+    return (
+        str(Path.home() / ".config" / "vidscribe" / "api_keys.env"),
+        ".env",
+        "api_keys.env",
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="VIDSCRIBE_",
-        env_file=(".env", "api_keys.env"),
+        env_file=None,
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def __init__(self, **values):
+        values.setdefault("_env_file", _env_files())
+        super().__init__(**values)
 
     data_dir: Path = Path.home() / "Library" / "Application Support" / "Vidscribe"
     database_path: Path | None = None
