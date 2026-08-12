@@ -12,6 +12,7 @@ from vidscribe.analysis import (
     parse_provider_analysis_result,
 )
 from vidscribe.models import AnalysisResult, ExtractionOptions
+from vidscribe.prompts import default_system_prompt
 from vidscribe.session_record import normalize_session_record_headings, validate_session_record
 
 
@@ -42,6 +43,13 @@ class FakeModels:
         )
 
 
+def test_snapshot_prompt_prioritizes_visible_deictic_anchor_words() -> None:
+    prompt = default_system_prompt()
+
+    assert "Anchor selection order:" in prompt
+    assert "Use a subject noun only when a direct cue does not exist." in prompt
+
+
 def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     tmp_path: Path,
 ) -> None:
@@ -53,7 +61,7 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
         transcript="[00:00] Speaker 1: Before\n\n(Silence 00:16)\n\n[00:17] Speaker 1: After",
         extra_instructions="Keep product names.",
         extraction_options=ExtractionOptions(),
-        timed_words=[(0, 100, "Before"), (1, 17100, "After")],
+        source_words=[(0, "Before"), (1, "After")],
     )
 
     raw = "".join(analyzer.stream(audio, analysis_input))
@@ -65,30 +73,25 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     assert request["config"]["thinking_config"]["thinking_level"] == "medium"
     assert request["config"]["response_mime_type"] == "application/json"
     assert request["config"]["response_json_schema"] == analysis_response_json_schema()
+    assert "session_record_markdown" not in request["config"]["response_json_schema"]["properties"]
     assert "snapshots" not in request["config"]["response_json_schema"]["properties"]
     assert "source_media_has_video" not in request["config"]["response_json_schema"]["properties"]
-    assert "corrected_transcript_turns" not in request["config"]["response_json_schema"]["properties"]
-    assert "replacement" not in request["config"]["response_json_schema"]["$defs"]["Mention"]["properties"]
     assert "response_schema" not in request["config"]
-    assert "[0, 100, \"Before\"]" in request["contents"][0]
-    assert "[1, 17100, \"After\"]" in request["contents"][0]
+    assert "[0, \"Before\"]" in request["contents"][0]
+    assert "[1, \"After\"]" in request["contents"][0]
     assert analysis_input.transcript not in request["contents"][0]
     assert "[00:00] Speaker 1:" not in request["contents"][0]
-    assert "no more than 350 words total" in request["contents"][0]
+    assert "no more than 350 words" in request["contents"][0]
     assert "context-appropriate emoji-led discussion topics" in request["contents"][0]
     assert "Never use checkbox or todo syntax" in request["contents"][0]
-    assert "02:38 Giant hole / spawn issue" in request["contents"][0]
-    assert "low-confidence, nonsensical, or unusual" in request["contents"][0]
-    assert "Return each distinct mention only once" in request["contents"][0]
-    assert "scan forward for the earliest completion" in request["contents"][0]
-    assert "Merely naming a tool, object, or phrase" in request["contents"][0]
-    assert "speaker_label chosen exactly from speaker_labels" in request["contents"][0]
-    assert "one line (single spaced)" in request["contents"][0]
-    assert "(Silence MM:SS)" in request["contents"][0]
-    assert "[HH:MM:SS] Speaker:" in request["contents"][0]
-    assert "Do not split mechanically" in request["contents"][0]
-    assert "Return at most one `overview` Snapshot Cue" in request["contents"][0]
-    assert "Input Context is server-owned" in request["contents"][0]
+    assert "Never calculate or return time" in request["contents"][0]
+    assert "do not repeat unchanged speech" in request["contents"][0]
+    assert "identify ALL navigational segments" in request["contents"][0]
+    assert "scan forward to the earliest visible completion" in request["contents"][0]
+    assert "Anchor selection order:" in request["contents"][0]
+    assert "Use a subject noun only when a direct cue does not exist." in request["contents"][0]
+    assert "Return every distinct mention once" in request["contents"][0]
+    assert "Return only the requested AnalysisPlan JSON object" in request["contents"][0]
     assert request["contents"][1].uri == "files/audio"
     assert result.short_name == "Demo Sync"
     assert client.files.deleted == ["files/analysis-audio"]

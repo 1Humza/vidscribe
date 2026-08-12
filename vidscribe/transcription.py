@@ -307,8 +307,11 @@ class DeterministicTranscriber:
         )
 
 
+SILENCE_THRESHOLD_SECONDS = 10.0
+
+
 class TranscriptFormatter:
-    silence_threshold_seconds = 15.0
+    silence_threshold_seconds = SILENCE_THRESHOLD_SECONDS
 
     def format(self, transcription: Transcription) -> str:
         words = sorted(transcription.words, key=lambda word: (word.start, word.end))
@@ -316,7 +319,7 @@ class TranscriptFormatter:
             transcription.segments, key=lambda segment: (segment.start, segment.end)
         )
         if not words:
-            return "\n\n".join(
+            return "\n".join(
                 f"[{self._clock(segment.start)}] Speaker 1: {segment.text.strip()}"
                 for segment in segments
             )
@@ -355,7 +358,7 @@ class TranscriptFormatter:
             turn.append(word)
             previous = word
         flush_turn()
-        return "\n\n".join(lines)
+        return "\n".join(lines)
 
     def _segment_index(
         self, word: WordTiming, segments: list[SegmentTiming]

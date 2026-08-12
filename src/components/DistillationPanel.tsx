@@ -192,6 +192,7 @@ export default function DistillationPanel({
         );
       }
       if (trimmed.startsWith('## ')) {
+        inTranscript = trimmed === '## Transcript';
         return (
           <h2 key={idx} className="text-sm font-sans font-bold tracking-wider text-muted-canvas uppercase mt-5 mb-2.5 border-b border-muted-canvas pb-1.5">
             {trimmed.substring(3)}
@@ -266,7 +267,7 @@ export default function DistillationPanel({
         }
 
         return (
-          <p key={idx} className="text-sm text-muted-canvas font-sans leading-relaxed my-2.5">
+          <p key={idx} className={`text-sm text-muted-canvas font-sans ${inTranscript ? 'my-0.5 leading-5' : 'leading-relaxed my-2.5'}`}>
             {highlightText(trimmed, inTranscript)}
           </p>
         );
