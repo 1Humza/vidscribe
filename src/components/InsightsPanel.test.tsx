@@ -157,8 +157,8 @@ it('renders an unclipped 1.5× snapshot hover layer and selects its transcript c
   const hoverPreview = Array.from(document.querySelectorAll<HTMLElement>('[data-snapshot-hover-preview="true"]')).at(-1);
   expect(hoverPreview).not.toBeNull();
   expect(hoverPreview).toHaveStyle({ left: '80px', top: '187.5px', width: '120px', height: '75px' });
-  expect(hoverPreview).toHaveClass('fixed');
-  expect(onMentionSelect).toHaveBeenCalledWith('look at this door');
+  expect(hoverPreview).toHaveClass('fixed', 'pointer-events-none');
+  expect(onMentionSelect).toHaveBeenLastCalledWith('look at this door');
 
   await user.click(snapshotButton);
   expect(onMentionSelect).toHaveBeenCalledWith('look at this door');

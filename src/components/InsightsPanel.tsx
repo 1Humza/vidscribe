@@ -622,14 +622,8 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
       {hoveredSnapshot && hoveredSnapshotData && typeof document !== 'undefined' && createPortal(
         <div
           data-snapshot-hover-preview="true"
-          onPointerLeave={(event) => {
-            if (!isWithinSnapshotHover(event.relatedTarget)) {
-              setHoveredSnapshot(null);
-              if (!activeSnapshot) onMentionSelect(null);
-            }
-          }}
           style={{ left: hoveredSnapshot.left, top: hoveredSnapshot.top, width: hoveredSnapshot.width, height: hoveredSnapshot.height }}
-          className="fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
+          className="pointer-events-none fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
         >
           <button type="button" onClick={() => setActiveSnapshotFilename(hoveredSnapshotData.filename)} className="absolute inset-0 w-full text-left">
             {hoveredSnapshotData.imageUrl ? (
@@ -660,7 +654,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
               onSnapshotKeep(hoveredSnapshotData.filename, !hoveredSnapshotData.kept);
             }}
             aria-label={`${hoveredSnapshotData.kept ? 'Remove' : 'Keep'} ${hoveredSnapshotData.filename}`}
-            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white/80 hover:bg-black/80 hover:text-white disabled:cursor-not-allowed"
+            className="pointer-events-auto absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white/80 hover:bg-black/80 hover:text-white disabled:cursor-not-allowed"
           >
             {hoveredSnapshotData.kept ? <X size={16} /> : <Plus size={16} />}
           </button>

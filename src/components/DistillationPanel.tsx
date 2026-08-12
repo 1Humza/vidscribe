@@ -121,7 +121,7 @@ export default function DistillationPanel({
     const turnEnd = markdownText.indexOf('\n', phraseStart);
     editor.focus({ preventScroll: true });
     editor.setSelectionRange(turnStart, turnEnd === -1 ? markdownText.length : turnEnd);
-    editor.scrollTop = Math.max(0, editor.scrollTop + editor.selectionStart / Math.max(1, markdownText.length) * editor.scrollHeight - editor.clientHeight / 2);
+    editor.scrollTop = turnStart / Math.max(1, markdownText.length) * Math.max(0, editor.scrollHeight - editor.clientHeight);
   }, [highlightPhrase, markdownText, viewMode]);
 
   const highlightText = (text: string, shouldHighlight = true): React.ReactNode => {
