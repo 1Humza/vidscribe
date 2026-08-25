@@ -49,6 +49,7 @@ interface DistillationPanelProps {
   onSaveMarkdown: () => void;
   highlightPhrase: string | null;
   highlightSourceWordIndex?: number | null;
+  highlightAnchorWord?: string | null;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onSelectSource: () => void;
   isReadOnly: boolean;
@@ -66,6 +67,7 @@ export default function DistillationPanel({
   onSaveMarkdown,
   highlightPhrase,
   highlightSourceWordIndex = null,
+  highlightAnchorWord = null,
   saveStatus,
   onSelectSource,
   isReadOnly
@@ -105,35 +107,48 @@ export default function DistillationPanel({
     URL.revokeObjectURL(url);
   };
 
-  const transcriptLineIndex = (markdown: string, phrase: string, sourceWordIndex: number | null) => {
+  const transcriptLineIndex = (markdown: string, phrase: string, sourceWordIndex: number | null, anchorWord: string | null) => {
     const lines = markdown.split('\n');
     const transcriptHeadingIndex = lines.findIndex((line) => /^#{1,6}\s+Transcript\b/i.test(line.trim()));
     if (transcriptHeadingIndex === -1) return -1;
 
     const phraseTokens = phrase.match(/[^\W_]+(?:['’][^\W_]+)?/gu)?.map((token) => token.toLocaleLowerCase()) || [];
+    const anchorToken = anchorWord?.match(/[^\W_]+(?:['’][^\W_]+)?/u)?.[0]?.toLocaleLowerCase() || null;
     const transcriptLines = lines.slice(transcriptHeadingIndex + 1).map((line, offset) => ({
       line,
       index: transcriptHeadingIndex + 1 + offset,
     }));
     const candidates: Array<{ index: number; distance: number }> = [];
+    const transcriptWords: Array<{ token: string; lineIndex: number; wordIndex: number }> = [];
     let sourceLineWordStart = 0;
 
     for (const item of transcriptLines) {
       if (/^#{1,6}\s+/.test(item.line.trim())) break;
       const content = item.line.replace(/^\s*\[[^\]]+\]\s+[^:]+:\s*/, '');
       const lineTokens = content.match(/[^\W_]+(?:['’][^\W_]+)?/gu)?.map((token) => token.toLocaleLowerCase()) || [];
-      if (lineTokens.length > 0 && phraseTokens.length > 0) {
-        for (let start = 0; start <= lineTokens.length - phraseTokens.length; start += 1) {
-          if (!phraseTokens.every((token, offset) => token === lineTokens[start + offset])) continue;
-          candidates.push({
-            index: item.index,
-            // The anchor is inside the cue phrase, so its fixed offset does not
-            // change which repeated phrase is closest to the canonical index.
-            distance: sourceWordIndex === null ? candidates.length : Math.abs(sourceLineWordStart + start - sourceWordIndex),
-          });
-        }
-      }
+      lineTokens.forEach((token, offset) => transcriptWords.push({
+        token,
+        lineIndex: item.index,
+        wordIndex: sourceLineWordStart + offset,
+      }));
       if (lineTokens.length > 0) sourceLineWordStart += lineTokens.length;
+    }
+
+    if (phraseTokens.length > 0) {
+      for (let start = 0; start <= transcriptWords.length - phraseTokens.length; start += 1) {
+        if (!phraseTokens.every((token, offset) => token === transcriptWords[start + offset].token)) continue;
+        const anchorOffsets = phraseTokens
+          .map((token, offset) => token === anchorToken ? offset : -1)
+          .filter((offset) => offset >= 0);
+        const offsets = anchorOffsets.length > 0 ? anchorOffsets : [0];
+        offsets.forEach((anchorOffset) => {
+          const targetWord = transcriptWords[start + anchorOffset];
+          candidates.push({
+            index: targetWord.lineIndex,
+            distance: sourceWordIndex === null ? candidates.length : Math.abs(targetWord.wordIndex - sourceWordIndex),
+          });
+        });
+      }
     }
 
     if (candidates.length > 0) {
@@ -158,12 +173,12 @@ export default function DistillationPanel({
     const highlightedTurn = contentRef.current
       ?.querySelector<HTMLElement>('[data-mention-highlight="true"]');
     highlightedTurn?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-  }, [highlightPhrase, markdownText, viewMode]);
+  }, [highlightPhrase, highlightSourceWordIndex, highlightAnchorWord, markdownText, viewMode]);
 
   useEffect(() => {
     if (!highlightPhrase || viewMode !== 'raw') return;
     const editor = markdownEditorRef.current;
-    const targetLine = transcriptLineIndex(markdownText, highlightPhrase, highlightSourceWordIndex);
+    const targetLine = transcriptLineIndex(markdownText, highlightPhrase, highlightSourceWordIndex, highlightAnchorWord);
     if (!editor || targetLine === -1) return;
     const lines = markdownText.split('\n');
     const turnStart = lines.slice(0, targetLine).reduce((offset, line) => offset + line.length + 1, 0);
@@ -171,7 +186,7 @@ export default function DistillationPanel({
     editor.focus({ preventScroll: true });
     editor.setSelectionRange(turnStart, turnEnd);
     editor.scrollTop = turnStart / Math.max(1, markdownText.length) * Math.max(0, editor.scrollHeight - editor.clientHeight);
-  }, [highlightPhrase, highlightSourceWordIndex, markdownText, viewMode]);
+  }, [highlightPhrase, highlightSourceWordIndex, highlightAnchorWord, markdownText, viewMode]);
 
   const highlightText = (text: string, shouldHighlight = true, lineIndex?: number, targetLineIndex?: number): React.ReactNode => {
     const phrase = highlightPhrase?.trim();
@@ -181,7 +196,13 @@ export default function DistillationPanel({
       return <mark data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{text}</mark>;
     }
     const expression = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return text.split(expression).map((part, index) => (
+    const parts = text.split(expression);
+    if (highlightSourceWordIndex !== null && lineIndex === targetLineIndex && parts.length === 1) {
+      // A cue can continue across several transcript turns; keep the first
+      // source turn visibly targeted when the complete phrase spans lines.
+      return <mark data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{text}</mark>;
+    }
+    return parts.map((part, index) => (
       index % 2 === 1
         ? <mark key={index} data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{part}</mark>
         : part
@@ -203,7 +224,7 @@ export default function DistillationPanel({
 
     const lines = cleanedMd.split('\n');
     const targetLine = highlightPhrase
-      ? transcriptLineIndex(cleanedMd, highlightPhrase, highlightSourceWordIndex)
+      ? transcriptLineIndex(cleanedMd, highlightPhrase, highlightSourceWordIndex, highlightAnchorWord)
       : -1;
     let inQuote = false;
     let quoteLines: string[] = [];

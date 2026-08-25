@@ -31,7 +31,7 @@ interface InsightsPanelProps {
   onReviewEdit: () => void;
   onSnapshotKeep: (filename: string, kept: boolean) => void;
   onMentionCorrect: (ranges: Array<{ sourceWordStart: number; sourceWordEnd: number }>, replacement: string) => void;
-  onMentionSelect: (phrase: string | null, sourceWordIndex?: number) => void;
+  onMentionSelect: (phrase: string | null, sourceWordIndex?: number, anchorWord?: string) => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onCommit: () => void;
   canCommit: boolean;
@@ -112,7 +112,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     const rect = element.getBoundingClientRect();
     const phrase = snapshot.cuePhrase || snapshot.anchorWord || null;
     if (snapshot.sourceWordIndex === undefined) onMentionSelect(phrase);
-    else onMentionSelect(phrase, snapshot.sourceWordIndex);
+    else onMentionSelect(phrase, snapshot.sourceWordIndex, snapshot.anchorWord);
     setHoveredSnapshot({
       filename: snapshot.filename,
       left: rect.left - rect.width * 0.25,
@@ -132,7 +132,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     if (!activeSnapshot) return;
     const phrase = activeSnapshot.cuePhrase || activeSnapshot.anchorWord || null;
     if (activeSnapshot.sourceWordIndex === undefined) onMentionSelect(phrase);
-    else onMentionSelect(phrase, activeSnapshot.sourceWordIndex);
+    else onMentionSelect(phrase, activeSnapshot.sourceWordIndex, activeSnapshot.anchorWord);
   }, [activeSnapshot, onMentionSelect]);
 
   useEffect(() => {
