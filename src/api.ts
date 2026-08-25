@@ -87,7 +87,7 @@ export function pickAttachments(initialPath?: string): Promise<AttachmentPickerS
 
 export function createSession(input: {
   sourceSelectionId: string;
-  destinationSelectionId: string;
+  destinationSelectionId?: string;
   extraInstructions: string;
   speakerHints?: string[];
   extractionOptions: ExtractionOptionsDto;
@@ -108,6 +108,14 @@ export function createSession(input: {
     effort: input.effort,
   };
   return postJson('/api/sessions', request);
+}
+
+export function updateSessionDestination(sessionId: string, destinationSelectionId: string): Promise<SessionViewDto> {
+  return requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/destination`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ destination_selection_id: destinationSelectionId }),
+  });
 }
 
 export function updateReview(

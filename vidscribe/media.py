@@ -8,6 +8,30 @@ class MediaPreparationError(RuntimeError):
     pass
 
 
+def probe_duration(path: Path, ffprobe_path: str = "ffprobe") -> float | None:
+    """Return media duration when ffprobe can read it, without blocking intake."""
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        duration = float(completed.stdout.strip())
+        return duration if duration > 0 else None
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return None
+
+
 class FFmpegMediaPreparer:
     def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
         self.ffmpeg_path = ffmpeg_path

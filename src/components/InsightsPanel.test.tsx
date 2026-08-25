@@ -161,13 +161,8 @@ it('renders an unclipped 1.5× snapshot hover layer and selects its transcript c
   expect(hoverPreview).not.toHaveClass('pointer-events-none');
   expect(onMentionSelect).toHaveBeenLastCalledWith('look at this door');
 
-  fireEvent.pointerLeave(snapshotCard!, { relatedTarget: hoverPreview });
-  expect(document.querySelector('[data-snapshot-hover-preview="true"]')).toBeInTheDocument();
-
-  fireEvent.pointerLeave(hoverPreview!, { relatedTarget: document.body });
-  expect(hoverPreview).not.toBeInTheDocument();
-
   await user.click(snapshotButton);
+  expect(document.querySelector('[data-snapshot-hover-preview="true"]')).not.toBeInTheDocument();
   expect(onMentionSelect).toHaveBeenCalledWith('look at this door');
 });
 

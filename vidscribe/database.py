@@ -130,10 +130,17 @@ class SessionRepository:
             if existing is not None:
                 session_id = existing["id"]
                 if existing["status"] != "completed":
-                    connection.execute(
-                        "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
-                        (str(Path(request.source_path).resolve()), now, session_id),
-                    )
+                    source_path = str(Path(request.source_path).resolve())
+                    if request.destination_path:
+                        connection.execute(
+                            "UPDATE sessions SET source_path = ?, destination_path = ?, updated_at = ? WHERE id = ?",
+                            (source_path, str(Path(request.destination_path).resolve()), now, session_id),
+                        )
+                    else:
+                        connection.execute(
+                            "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
+                            (source_path, now, session_id),
+                        )
             else:
                 session_id = str(uuid4())
                 connection.execute(
@@ -147,7 +154,7 @@ class SessionRepository:
                         session_id,
                         str(Path(request.source_path).resolve()),
                         request.source_fingerprint,
-                        str(Path(request.destination_path).resolve()),
+                        str(Path(request.destination_path).resolve()) if request.destination_path else "",
                         request.extra_instructions,
                         json.dumps(request.speaker_hints),
                         request.extraction_options.model_dump_json(),
@@ -174,6 +181,8 @@ class SessionRepository:
                 (session_id,),
             ).fetchall()
         payload = dict(row)
+        # Empty destination paths represent sessions that have not reached commit selection yet.
+        payload["destination_path"] = payload["destination_path"] or None
         payload["extraction_options"] = json.loads(payload["extraction_options"])
         payload["speaker_hints"] = json.loads(payload["speaker_hints"])
         payload["attachment_paths"] = json.loads(payload["attachment_paths"])
@@ -261,6 +270,7 @@ class SessionRepository:
             "transcript",
             "transcript_word_timings",
             "source_path",
+            "destination_path",
             "completed_folder_path",
             "model",
             "effort",

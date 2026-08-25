@@ -4,7 +4,6 @@ import {
   Cpu,
   FileAudio,
   FileVideo,
-  Inbox,
   Paperclip,
   Play,
   Plus,
@@ -17,7 +16,6 @@ import type {
   ExtractionOptionsDto,
   AnalysisEffortDto,
   AnalysisModelDto,
-  SelectedDestination,
   SelectedAttachment,
   SelectedSource,
   SessionStage,
@@ -25,10 +23,8 @@ import type {
 
 interface IntakePanelProps {
   source: SelectedSource | null;
-  destination: SelectedDestination | null;
   onSelectSource: () => void;
   onClearSource: () => void;
-  onSelectDestination: () => void;
   pickerBusy: 'source' | 'destination' | null;
   context: string;
   setContext: (value: string) => void;
@@ -56,6 +52,36 @@ const extractionTiles: Array<{ key: keyof ExtractionOptionsDto; label: string }>
   { key: 'topics', label: 'Topics Matrix' },
   { key: 'highlights', label: 'Highlights' },
 ];
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (bytes == null) return 'size unavailable';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 'B';
+  for (const nextUnit of units) {
+    value /= 1024;
+    unit = nextUnit;
+    if (value < 1024 || nextUnit === units.at(-1)) break;
+  }
+  const precision = value >= 10 || Number.isInteger(value) ? 0 : 1;
+  return `${value.toFixed(precision)} ${unit}`;
+}
+
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return 'duration unavailable';
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainder = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`
+    : `${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
+}
+
+function formatSourceDate(sourceDate: string | null | undefined): string {
+  return sourceDate || 'date unavailable';
+}
 
 export default function IntakePanel(props: IntakePanelProps) {
   const [showAddSpeaker, setShowAddSpeaker] = useState(false);
@@ -94,7 +120,7 @@ export default function IntakePanel(props: IntakePanelProps) {
     .toUpperCase() || '?';
 
   const progress = props.progress > 1 ? props.progress / 100 : props.progress;
-  const canExecute = Boolean(props.source && props.destination);
+  const canExecute = Boolean(props.source);
 
   return (
     <div className="w-full max-w-5xl mx-auto py-6 px-4 font-sans select-none">
@@ -112,11 +138,6 @@ export default function IntakePanel(props: IntakePanelProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Source</h2>
-              {props.source && (
-                <span className="px-2.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400 font-mono text-[10px] uppercase tracking-wider font-bold">
-                  Active
-                </span>
-              )}
             </div>
 
             {props.source ? (
@@ -130,7 +151,7 @@ export default function IntakePanel(props: IntakePanelProps) {
                       {props.source.name}
                     </div>
                     <div className="text-[10px] text-muted-canvas font-mono mt-0.5 truncate max-w-[260px] uppercase" title={props.source.path}>
-                      {props.source.mediaKind} • size pending • duration pending • date pending
+                      {props.source.mediaKind} • {formatFileSize(props.source.sizeBytes)} • {formatDuration(props.source.durationSeconds)} • {formatSourceDate(props.source.sourceDate)}
                     </div>
                   </div>
                 </div>
@@ -212,10 +233,12 @@ export default function IntakePanel(props: IntakePanelProps) {
                 />
               </div>
 
-              <div className="text-xs font-mono text-muted-canvas flex flex-wrap items-center gap-1.5 pt-1" aria-label="Attached Context">
-                <span className="font-semibold">Attachments:</span>
-                {props.attachments.length ? props.attachments.map((attachment) => <span key={attachment.path} className="inline-flex items-center space-x-1.5 bg-input-canvas border border-muted-canvas/65 px-2 py-0.5 rounded"><Paperclip size={10} /><span>{attachment.name}</span></span>) : <span>None selected</span>}
-              </div>
+              {props.attachments.length > 0 && (
+                <div className="text-xs font-mono text-muted-canvas flex flex-wrap items-center gap-1.5 pt-1" aria-label="Attached Context">
+                  <span className="font-semibold">Attachments:</span>
+                  {props.attachments.map((attachment) => <span key={attachment.path} className="inline-flex items-center space-x-1.5 bg-input-canvas border border-muted-canvas/65 px-2 py-0.5 rounded"><Paperclip size={10} /><span>{attachment.name}</span></span>)}
+                </div>
+              )}
             </div>
           </div>
 
@@ -334,25 +357,6 @@ export default function IntakePanel(props: IntakePanelProps) {
                 );
               })}
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">Save to</h2>
-            <button
-              type="button"
-              aria-label="Select Destination"
-              onClick={props.onSelectDestination}
-              disabled={props.pickerBusy !== null || props.isProcessing}
-              className="w-full flex items-center bg-input-canvas border border-muted-canvas rounded-xl px-3 py-2.5 hover:border-active-canvas transition-colors text-left cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Inbox size={15} className="text-muted-canvas mr-2 flex-shrink-0" />
-              <span className={`min-w-0 flex-1 text-left ${props.destination ? 'text-main-canvas' : 'text-muted-canvas'}`} title={props.destination?.path}>
-                {props.pickerBusy === 'destination'
-                  ? 'Opening output folder picker…'
-                  : props.destination ? <><span className="block text-xs font-semibold truncate">{props.destination.name}</span><span className="block text-[10px] font-mono text-muted-canvas truncate mt-0.5">{props.destination.path}</span></> : <span className="text-xs font-mono">Choose output folder</span>}
-              </span>
-              <span className="ml-2 text-[10px] font-mono uppercase tracking-wider text-orange-500">{props.destination ? 'Change' : 'Choose'}</span>
-            </button>
           </div>
 
           <div className="space-y-3">

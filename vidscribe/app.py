@@ -12,9 +12,10 @@ from vidscribe.config import Settings
 from vidscribe.database import SessionRepository
 from vidscribe.fingerprints import source_fingerprint
 from vidscribe.finalization import DestinationConflict, FinalizationError, SessionFinalizer
-from vidscribe.media import FFmpegMediaPreparer
+from vidscribe.media import FFmpegMediaPreparer, probe_duration
 from vidscribe.models import (
     CreateSessionRequest,
+    DestinationSelectionRequest,
     ExecuteSessionRequest,
     OpenCompletedSessionRequest,
     OpenSourceSessionRequest,
@@ -103,6 +104,21 @@ def create_app(
     app.state.service_id = str(uuid4())
     app.state.last_raw_stream_cleanup = datetime.now(UTC)
 
+    def add_source_metadata(session: SessionView) -> SessionView:
+        source = Path(session.source_path)
+        try:
+            if not source.is_file():
+                return session
+            return session.model_copy(
+                update={
+                    "source_size_bytes": source.stat().st_size,
+                    "source_duration_seconds": probe_duration(source, app_settings.ffprobe_path),
+                    "source_date": infer_session_date(source, app_settings.ffprobe_path),
+                }
+            )
+        except OSError:
+            return session
+
     @app.middleware("http")
     async def enforce_loopback_host(request: Request, call_next):
         hostname = (request.url.hostname or "").lower()
@@ -140,8 +156,10 @@ def create_app(
     def create_session(request: CreateSessionRequest) -> SessionView:
         try:
             source = selections.resolve(request.source_selection_id, "source")
-            destination = selections.resolve(
-                request.destination_selection_id, "destination"
+            destination = (
+                selections.resolve(request.destination_selection_id, "destination")
+                if request.destination_selection_id
+                else None
             )
             attachments = [
                 selections.resolve(selection_id, "attachment")
@@ -153,7 +171,7 @@ def create_app(
             ) from error
         if not source.is_file():
             raise HTTPException(status_code=422, detail="Source Media must be an existing file")
-        if not destination.is_dir():
+        if destination is not None and not destination.is_dir():
             raise HTTPException(status_code=422, detail="Destination must be an existing directory")
         if any(not attachment.is_file() for attachment in attachments):
             raise HTTPException(status_code=422, detail="Attached Context must be existing files")
@@ -166,7 +184,7 @@ def create_app(
             ResolvedSessionIntake(
                 source_path=str(source),
                 source_fingerprint=source_fingerprint(source),
-                destination_path=str(destination),
+                destination_path=str(destination) if destination is not None else None,
                 extra_instructions=request.extra_instructions,
                 speaker_hints=request.speaker_hints,
                 extraction_options=request.extraction_options,
@@ -176,6 +194,19 @@ def create_app(
                 attachment_paths=[str(attachment) for attachment in attachments],
             )
         )
+
+    @app.put("/api/sessions/{session_id}/destination", response_model=SessionView)
+    def update_session_destination(session_id: str, request: DestinationSelectionRequest) -> SessionView:
+        try:
+            session = repository.get(session_id)
+            destination = selections.resolve(request.destination_selection_id, "destination")
+        except KeyError as error:
+            raise HTTPException(status_code=422, detail="Picker selection is invalid or expired") from error
+        if session.status in {"processing", "finalizing", "completed"}:
+            raise HTTPException(status_code=409, detail="Output Folder cannot be changed while this Session is active")
+        if not destination.is_dir():
+            raise HTTPException(status_code=422, detail="Destination must be an existing directory")
+        return repository.update_session(session_id, destination_path=str(destination.resolve()))
 
     @app.post("/api/sessions/open-source", response_model=SessionView)
     def open_source_session(request: OpenSourceSessionRequest) -> SessionView:
@@ -212,11 +243,15 @@ def create_app(
         if not selected.is_file():
             raise HTTPException(status_code=422, detail="Selected Source Media is not a file or folder")
         audio_extensions = {".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".wav"}
+        resolved = selected.resolve()
         return PickerSelection(
-            selection_id=selections.issue("source", selected),
-            path=str(selected.resolve()),
+            selection_id=selections.issue("source", resolved),
+            path=str(resolved),
             name=selected.name,
             media_kind="audio" if selected.suffix.lower() in audio_extensions else "video",
+            size_bytes=resolved.stat().st_size,
+            duration_seconds=probe_duration(resolved, app_settings.ffprobe_path),
+            source_date=infer_session_date(resolved, app_settings.ffprobe_path),
         )
 
     @app.post("/api/sessions/open-completed", response_model=SessionView)
@@ -293,7 +328,7 @@ def create_app(
     @app.get("/api/sessions/{session_id}", response_model=SessionView)
     def get_session(session_id: str) -> SessionView:
         try:
-            return repository.get(session_id)
+            return add_source_metadata(repository.get(session_id))
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Session not found") from error
 
@@ -359,6 +394,8 @@ def create_app(
 
         try:
             current = repository.get(session_id)
+            if current.destination_path is None:
+                raise HTTPException(status_code=422, detail="Select an Output Folder before committing")
             cross_volume = False
             if current.status in {"review", "needs_attention"}:
                 cross_volume = not app.state.finalizer.paths_share_volume(

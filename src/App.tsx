@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, updateReview, updateSystemPrompt, type SessionEvent } from './api';
+import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, updateReview, updateSessionDestination, updateSystemPrompt, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -101,7 +101,7 @@ export default function App() {
   const hasOutput = Boolean(analysisPreview || review);
   const isReviewReadOnly = session?.status === 'finalizing';
   const canCommit = Boolean(
-    session && validatedResult && ['review', 'needs_attention', 'completed'].includes(session.status),
+    session && validatedResult && destination && ['review', 'needs_attention', 'completed'].includes(session.status),
   );
 
   const applySession = (
@@ -116,12 +116,19 @@ export default function App() {
       path: next.source_path,
       name: fileName(next.source_path),
       mediaKind: selectedSource?.path === next.source_path ? selectedSource.mediaKind : current?.path === next.source_path ? current.mediaKind : mediaKindForPath(next.source_path),
+      sizeBytes: selectedSource?.path === next.source_path ? selectedSource.sizeBytes : current?.path === next.source_path ? current.sizeBytes ?? next.source_size_bytes : next.source_size_bytes,
+      durationSeconds: selectedSource?.path === next.source_path ? selectedSource.durationSeconds : current?.path === next.source_path ? current.durationSeconds ?? next.source_duration_seconds : next.source_duration_seconds,
+      sourceDate: selectedSource?.path === next.source_path ? selectedSource.sourceDate : current?.path === next.source_path ? current.sourceDate ?? next.source_date : next.source_date,
     }));
-    setDestination((current) => ({
-      selectionId: current?.path === next.destination_path ? current.selectionId : undefined,
-      path: next.destination_path,
-      name: fileName(next.destination_path),
-    }));
+    if (next.destination_path) {
+      setDestination((current) => ({
+        selectionId: current?.path === next.destination_path ? current.selectionId : undefined,
+        path: next.destination_path,
+        name: fileName(next.destination_path),
+      }));
+    } else {
+      setDestination(null);
+    }
     const intake = intakeFromSession(next.extra_instructions || '', next.speaker_hints);
     setContext(intake.context);
     setSpeakers(intake.speakers);
@@ -203,7 +210,15 @@ export default function App() {
         applySession(await openCompletedSession(selected.selection_id));
         return;
       }
-      const selectedSource = { selectionId: selected.selection_id, path: selected.path, name: selected.name, mediaKind: selected.media_kind };
+      const selectedSource = {
+        selectionId: selected.selection_id,
+        path: selected.path,
+        name: selected.name,
+        mediaKind: selected.media_kind,
+        sizeBytes: selected.size_bytes,
+        durationSeconds: selected.duration_seconds,
+        sourceDate: selected.source_date,
+      };
       setSource(selectedSource);
       setSession(null);
       setAnalysisPreview('');
@@ -221,17 +236,24 @@ export default function App() {
     }
   };
 
-  const selectDestination = async () => {
+  const selectDestination = async (preserveSession = false) => {
     setPickerBusy('destination');
     setErrorNotice(null);
     try {
       const selected = await pickDestination(destination?.path);
-      setDestination({ selectionId: selected.selection_id, path: selected.path, name: selected.name });
-      setSession(null);
-      setAnalysisPreview('');
-      setReviewMarkdown('');
-      setAttachments([]);
-      window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      const selectedDestination = { selectionId: selected.selection_id, path: selected.path, name: selected.name };
+      if (preserveSession && session) {
+        const updated = await updateSessionDestination(session.id, selected.selection_id);
+        setSession((current) => current ? { ...current, destination_path: updated.destination_path } : updated);
+        setDestination(selectedDestination);
+      } else {
+        setDestination(selectedDestination);
+        setSession(null);
+        setAnalysisPreview('');
+        setReviewMarkdown('');
+        setAttachments([]);
+        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      }
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The destination picker failed.'));
     } finally {
@@ -278,9 +300,13 @@ export default function App() {
   };
 
   const handleExecute = async () => {
-    if (!source || !destination || isProcessing) return;
-    if (!session && (!source.selectionId || !destination.selectionId)) {
-      setErrorNotice('Select Source and Destination again before creating a new session.');
+    if (!source || isProcessing) return;
+    if (!session && !source.selectionId) {
+      setErrorNotice('Select Source again before creating a new session.');
+      return;
+    }
+    if (session && !source.selectionId) {
+      setErrorNotice('Select Source again before executing this session.');
       return;
     }
     setErrorNotice(null);
@@ -293,7 +319,7 @@ export default function App() {
     try {
       const active = session || await createSession({
         sourceSelectionId: source.selectionId!,
-        destinationSelectionId: destination.selectionId!,
+        destinationSelectionId: destination?.selectionId,
         extraInstructions: context,
         speakerHints: speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean),
         extractionOptions,
@@ -423,10 +449,8 @@ export default function App() {
         <div className="flex-1 flex flex-col justify-center">
           <IntakePanel
             source={source}
-            destination={destination}
             onSelectSource={selectSource}
             onClearSource={clearSource}
-            onSelectDestination={selectDestination}
             pickerBusy={pickerBusy}
             context={context}
             setContext={setContext}
@@ -524,6 +548,9 @@ export default function App() {
               saveStatus={saveStatus}
               onCommit={commitReview}
               canCommit={canCommit}
+              destination={destination}
+              onSelectDestination={() => void selectDestination(true)}
+              pickerBusy={pickerBusy}
               isCommitPending={isCommitting}
               isReadOnly={isReviewReadOnly}
             />

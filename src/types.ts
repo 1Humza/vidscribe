@@ -61,7 +61,10 @@ export interface SessionViewDto {
   stage: SessionStage;
   progress: number;
   source_path: string;
-  destination_path: string;
+  source_size_bytes?: number | null;
+  source_duration_seconds?: number | null;
+  source_date?: string | null;
+  destination_path: string | null;
   extra_instructions: string;
   speaker_hints: string[];
   extraction_options: ExtractionOptionsDto;
@@ -84,6 +87,9 @@ export interface SourcePickerSelectionDto {
   path: string;
   name: string;
   media_kind: 'audio' | 'video' | null;
+  size_bytes?: number | null;
+  duration_seconds?: number | null;
+  source_date?: string | null;
 }
 
 export interface DestinationPickerSelectionDto {
@@ -106,7 +112,7 @@ export interface SelectedAttachment {
 
 export interface CreateSessionRequestDto {
   source_selection_id: string;
-  destination_selection_id: string;
+  destination_selection_id?: string;
   extra_instructions?: string;
   speaker_hints?: string[];
   extraction_options: ExtractionOptionsDto;
@@ -154,6 +160,9 @@ export interface SelectedSource {
   path: string;
   name: string;
   mediaKind: 'audio' | 'video';
+  sizeBytes?: number | null;
+  durationSeconds?: number | null;
+  sourceDate?: string | null;
 }
 
 export interface SelectedDestination {

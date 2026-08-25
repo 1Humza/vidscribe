@@ -14,12 +14,13 @@ import {
   Folder,
   Image,
   Info,
+  Inbox,
   Lightbulb,
   Plus,
   Star,
   X,
 } from 'lucide-react';
-import type { DistillationResult, FileTreeNode } from '../types';
+import type { DistillationResult, FileTreeNode, SelectedDestination } from '../types';
 import GlassModal from './GlassModal';
 
 interface InsightsPanelProps {
@@ -34,6 +35,9 @@ interface InsightsPanelProps {
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onCommit: () => void;
   canCommit: boolean;
+  destination?: SelectedDestination | null;
+  onSelectDestination?: () => void;
+  pickerBusy?: 'source' | 'destination' | null;
   isCommitPending: boolean;
   isReadOnly: boolean;
 }
@@ -68,7 +72,7 @@ function isoDate(sessionDate: string): string {
   return match ? `${match[3]}-${match[1]}-${match[2]}` : sessionDate;
 }
 
-export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, isCommitPending, isReadOnly }: InsightsPanelProps) {
+export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, destination = null, onSelectDestination = () => undefined, pickerBusy = null, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [activeSnapshotFilename, setActiveSnapshotFilename] = useState<string | null>(null);
   const [hoveredSnapshot, setHoveredSnapshot] = useState<{ filename: string; left: number; top: number; width: number; height: number } | null>(null);
@@ -87,6 +91,17 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     ? snapshots.findIndex((snapshot) => snapshot.filename === activeSnapshotFilename)
     : -1;
   const hoveredSnapshotData = snapshots.find((snapshot) => snapshot.filename === hoveredSnapshot?.filename) ?? null;
+
+  const openSnapshot = (filename: string) => {
+    setHoveredSnapshot(null);
+    setActiveSnapshotFilename(filename);
+  };
+
+  const closeSnapshot = () => {
+    setHoveredSnapshot(null);
+    setActiveSnapshotFilename(null);
+    onMentionSelect(null);
+  };
 
   const isWithinSnapshotHover = (target: EventTarget | null) => (
     target instanceof HTMLElement
@@ -127,7 +142,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
       event.preventDefault();
       const direction = event.key === 'ArrowRight' ? 1 : -1;
       const nextIndex = (activeSnapshotIndex + direction + snapshots.length) % snapshots.length;
-      setActiveSnapshotFilename(snapshots[nextIndex].filename);
+      openSnapshot(snapshots[nextIndex].filename);
     };
     window.addEventListener('keydown', cycleSnapshot);
     return () => window.removeEventListener('keydown', cycleSnapshot);
@@ -279,8 +294,22 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
             </div>
 
             <div className="border-b border-muted-canvas pb-3">
-              <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider mb-1.5">
-                Filesystem Preview
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider">
+                  Filesystem Preview
+                </div>
+                <button
+                  type="button"
+                  aria-label="Select Destination"
+                  onClick={onSelectDestination}
+                  disabled={pickerBusy !== null || isReadOnly}
+                  className="flex min-w-0 max-w-[58%] items-center gap-1.5 text-left text-orange-600 dark:text-orange-400 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Inbox size={12} className="shrink-0" />
+                  <span className="min-w-0 truncate text-[10px] font-mono uppercase tracking-wider">
+                    {pickerBusy === 'destination' ? 'Opening output picker…' : destination ? destination.name : 'Choose output folder'}
+                  </span>
+                </button>
               </div>
               <div className="border border-muted-canvas p-2 rounded bg-input-canvas/50 min-h-9 max-h-[160px] overflow-y-auto">
                 {result.filesystem.length > 0 ? (
@@ -337,15 +366,6 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                   </div>
                 ))}
 
-                <button
-                  type="button"
-                  disabled
-                  title={pendingActionTitle}
-                  className="flex items-center justify-center space-x-1 py-1 rounded border border-dashed border-muted-canvas text-[11px] text-muted-canvas opacity-50 cursor-not-allowed"
-                >
-                  <Plus size={10} />
-                  <span>Add Speaker</span>
-                </button>
               </div>
             </div>
 
@@ -427,7 +447,10 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider">Snapshots</div>
                 <button
                   type="button"
-                  onClick={() => setActiveSnapshotFilename(snapshots.find((snapshot) => snapshot.kept)?.filename || snapshots[0]?.filename || null)}
+                  onClick={() => {
+                    const filename = snapshots.find((snapshot) => snapshot.kept)?.filename || snapshots[0]?.filename;
+                    if (filename) openSnapshot(filename);
+                  }}
                   aria-label="Preview Snapshots"
                   title="Preview proposed Snapshots"
                   className="text-[10px] text-orange-500 hover:underline font-bold uppercase tracking-wider cursor-pointer"
@@ -454,7 +477,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                       }}
                       className={`group relative aspect-[16/10] rounded border transition-[border-color,box-shadow] duration-200 overflow-hidden cursor-pointer text-left ${!snapshot.kept ? 'border-muted-canvas bg-input-canvas/30' : 'border-muted-canvas bg-input-canvas/30 hover:border-active-canvas'}`}
                     >
-                      <button type="button" onClick={() => setActiveSnapshotFilename(snapshot.filename)} className="absolute inset-0 w-full text-left">
+                      <button type="button" onClick={() => openSnapshot(snapshot.filename)} className="absolute inset-0 w-full text-left">
                       {snapshot.imageUrl ? (
                         <div className="absolute inset-0 overflow-hidden bg-input-canvas">
                           <img
@@ -571,7 +594,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
 
       <GlassModal
         isOpen={activeSnapshot !== null}
-        onClose={() => setActiveSnapshotFilename(null)}
+        onClose={closeSnapshot}
         title="Snapshots"
         size="full"
         minimal
@@ -635,7 +658,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
           }}
           className="fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
         >
-          <button type="button" onClick={() => setActiveSnapshotFilename(hoveredSnapshotData.filename)} className="absolute inset-0 w-full text-left">
+          <button type="button" onClick={() => openSnapshot(hoveredSnapshotData.filename)} className="absolute inset-0 w-full text-left">
             {hoveredSnapshotData.imageUrl ? (
               <img
                 src={hoveredSnapshotData.imageUrl}

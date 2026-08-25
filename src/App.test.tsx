@@ -81,16 +81,17 @@ describe('issue 2 session UI', () => {
 
   it('uses opaque picker selections, previews raw streaming, then promotes a validated result', async () => {
     const fetchMock = vi.fn()
-      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video', size_bytes: 2048, duration_seconds: 125, source_date: '2026-07-31' }))
       .mockImplementationOnce(noSourceSession)
-      .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
-      .mockImplementationOnce(() => json(session, 201))
+      .mockImplementationOnce(() => json({ ...session, destination_path: null }, 201))
       .mockImplementationOnce(() => sse([
-        `event: session\ndata: ${JSON.stringify({ ...session, status: 'processing', stage: 'preparing', progress: 10 })}\n\n`,
-        `event: session\ndata: ${JSON.stringify({ ...session, status: 'processing', stage: 'transcribing', progress: 40 })}\n\n`,
+        `event: session\ndata: ${JSON.stringify({ ...session, destination_path: null, status: 'processing', stage: 'preparing', progress: 10 })}\n\n`,
+        `event: session\ndata: ${JSON.stringify({ ...session, destination_path: null, status: 'processing', stage: 'transcribing', progress: 40 })}\n\n`,
         'event: analysis_delta\ndata: {"attempt_id":"attempt-1","delta":"{\\\"session_record_markdown\\\":\\\"# Team","raw_stream":"{\\\"session_record_markdown\\\":\\\"# Team"}\n\n',
-        `event: complete\ndata: ${JSON.stringify({ ...session, status: 'review', stage: 'review', progress: 100, transcript: '[00:00] Speaker 1: Hello', transcript_word_timings: [{ word: 'Use', start: 0, end: 0.1 }, { word: 'Slab.', start: 0.1, end: 0.2 }, { word: 'slab', start: 0.2, end: 0.3 }], attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '07-31-2026', speaker_labels: ['Speaker 1'], mentions: [{ source_word_start: 1, source_word_end: 1 }, { source_word_start: 2, source_word_end: 2 }] }, error: null }] })}\n\n`,
+        `event: complete\ndata: ${JSON.stringify({ ...session, destination_path: null, status: 'review', stage: 'review', progress: 100, transcript: '[00:00] Speaker 1: Hello', transcript_word_timings: [{ word: 'Use', start: 0, end: 0.1 }, { word: 'Slab.', start: 0.1, end: 0.2 }, { word: 'slab', start: 0.2, end: 0.3 }], attempts: [{ id: 'attempt-1', status: 'completed', model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '{}', result: { session_record_markdown: '# Team Sync\n\n(Silence 00:16)', short_name: 'Team Sync', session_date: '07-31-2026', speaker_labels: ['Speaker 1'], mentions: [{ source_word_start: 1, source_word_end: 1 }, { source_word_start: 2, source_word_end: 2 }] }, error: null }] })}\n\n`,
       ]))
+      .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs' }))
+      .mockImplementationOnce(() => json({ ...session, destination_path: session.destination_path }))
       .mockImplementationOnce(() => json({
         ...session,
         status: 'review',
@@ -134,7 +135,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('low');
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
-    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
+    expect(screen.getByTitle(session.source_path)).toHaveTextContent('video • 2 KB • 02:05 • 2026-07-31');
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     const review = await screen.findByRole('region', { name: 'Final Review' });
@@ -144,39 +145,40 @@ describe('issue 2 session UI', () => {
     expect(screen.getByText('2026-07-31-team-sync.md')).toBeInTheDocument();
     expect(screen.getByText('2026-07-31-team-sync.24k.ogg')).toBeInTheDocument();
     expect(screen.getByText('2026-07-31-team-sync.mp4')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled());
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview Snapshots' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
     expect(screen.getByLabelText('Session Date')).toHaveValue('2026-07-31T12:00');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vidscribe.activeSessionId')).toBe('session-1');
-    const createRequest = fetchMock.mock.calls[3][1] as RequestInit;
+    const createRequest = fetchMock.mock.calls[2][1] as RequestInit;
     expect(JSON.parse(createRequest.body as string)).toMatchObject({
       source_selection_id: 'source-token',
-      destination_selection_id: 'destination-token',
       model: 'gemini-2.5-flash',
       effort: 'low',
     });
-    const executeRequest = fetchMock.mock.calls[4][1] as RequestInit;
+    const executeRequest = fetchMock.mock.calls[3][1] as RequestInit;
     expect(JSON.parse(executeRequest.body as string)).toEqual({ model: 'gemini-2.5-flash', effort: 'low' });
 
     fireEvent.change(screen.getByLabelText('Session Date'), { target: { value: '2026-08-01T14:30' } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    expect(JSON.parse((fetchMock.mock.calls[5][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01', session_time: '14:30' });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    expect(JSON.parse((fetchMock.mock.calls[6][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01', session_time: '14:30' });
     expect(screen.getByLabelText('Session Date')).toHaveValue('2026-08-01T14:30');
     expect(screen.getByText('2026-08-01-team-sync')).toBeInTheDocument();
 
     const title = screen.getByLabelText('Short Name');
     await user.clear(title);
     await user.type(title, 'Renamed meeting{Enter}');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
-    expect((fetchMock.mock.calls[6][1] as RequestInit).method).toBe('PATCH');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8));
+    expect((fetchMock.mock.calls[7][1] as RequestInit).method).toBe('PATCH');
     expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Commit' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8));
-    const commitRequest = fetchMock.mock.calls[7][1] as RequestInit;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
+    const commitRequest = fetchMock.mock.calls[8][1] as RequestInit;
     expect(commitRequest.method).toBe('POST');
     expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     expect(screen.getByRole('textbox', { name: 'Session Record Markdown' })).not.toHaveAttribute('readonly');
@@ -192,15 +194,13 @@ describe('issue 2 session UI', () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
       .mockImplementationOnce(noSourceSession)
-      .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
-      .mockImplementationOnce(() => json(session, 201))
+      .mockImplementationOnce(() => json({ ...session, destination_path: null }, 201))
       .mockImplementationOnce(() => Promise.resolve(openStream));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
-    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     expect(await screen.findByRole('button', { name: 'Abort · Pending' })).toBeDisabled();
@@ -212,6 +212,9 @@ describe('issue 2 session UI', () => {
     window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
     const hydrated = {
       ...session,
+      source_size_bytes: 2048,
+      source_duration_seconds: 125,
+      source_date: '2026-07-31',
       extra_instructions: 'Keep the executive summary concise.\nSpeaker hints: Alex, Sam',
       speaker_hints: [],
       status: 'review' as const,
@@ -234,7 +237,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByText('Alex')).toBeInTheDocument();
     expect(screen.getByText('Sam')).toBeInTheDocument();
     expect(screen.getByLabelText('Context and Instructions')).toHaveValue('Keep the executive summary concise.');
-    expect(screen.getByText(/video • size pending • duration pending • date pending/i)).toBeInTheDocument();
+    expect(screen.getByTitle(session.source_path)).toHaveTextContent('video • 2 KB • 02:05 • 2026-07-31');
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-execute' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Remove Source' }));
@@ -247,8 +250,7 @@ describe('issue 2 session UI', () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
       .mockImplementationOnce(noSourceSession)
-      .mockImplementationOnce(() => json({ selection_id: 'destination-token', path: session.destination_path, name: 'syncs', media_kind: null }))
-      .mockImplementationOnce(() => json(session, 201))
+      .mockImplementationOnce(() => json({ ...session, destination_path: null }, 201))
       .mockImplementationOnce(() => sse([
         `event: analysis_delta\ndata: ${JSON.stringify({ attempt_id: 'attempt-1', delta: streamedPreview, raw_stream: streamedPreview })}\n\n`,
         `event: analysis_error\ndata: ${JSON.stringify({ attempt_id: 'attempt-1', message: 'Provider connection failed', raw_stream: streamedPreview })}\n\n`,
@@ -257,7 +259,6 @@ describe('issue 2 session UI', () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
-    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     const preview = await screen.findByRole('region', { name: 'Analysis Preview' });

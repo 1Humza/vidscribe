@@ -34,7 +34,7 @@ class AnalysisSelection(BaseModel):
 
 class CreateSessionRequest(AnalysisSelection):
     source_selection_id: str
-    destination_selection_id: str
+    destination_selection_id: str | None = None
     extra_instructions: str = ""
     speaker_hints: list[str] = Field(default_factory=list)
     extraction_options: ExtractionOptions = Field(default_factory=ExtractionOptions)
@@ -52,6 +52,12 @@ class OpenSourceSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_selection_id: str
+
+
+class DestinationSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    destination_selection_id: str
 
 
 class ExecuteSessionRequest(BaseModel):
@@ -72,7 +78,7 @@ class ExecuteSessionRequest(BaseModel):
 class ResolvedSessionIntake(AnalysisSelection):
     source_path: str
     source_fingerprint: str
-    destination_path: str
+    destination_path: str | None = None
     extra_instructions: str = ""
     speaker_hints: list[str] = Field(default_factory=list)
     extraction_options: ExtractionOptions = Field(default_factory=ExtractionOptions)
@@ -106,6 +112,9 @@ class PickerSelection(BaseModel):
     path: str
     name: str
     media_kind: Literal["audio", "video"] | None = None
+    size_bytes: int | None = None
+    duration_seconds: float | None = None
+    source_date: date | None = None
 
 
 class SourceRange(BaseModel):
@@ -271,7 +280,10 @@ class SessionView(BaseModel):
     stage: Literal["intake", "preparing", "transcribing", "analyzing", "review", "completed"]
     progress: int
     source_path: str
-    destination_path: str
+    source_size_bytes: int | None = None
+    source_duration_seconds: float | None = None
+    source_date: date | None = None
+    destination_path: str | None
     extra_instructions: str
     speaker_hints: list[str] = Field(default_factory=list)
     extraction_options: ExtractionOptions
