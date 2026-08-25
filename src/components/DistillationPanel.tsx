@@ -48,6 +48,7 @@ interface DistillationPanelProps {
   setMarkdownText: (text: string) => void;
   onSaveMarkdown: () => void;
   highlightPhrase: string | null;
+  highlightSourceWordIndex?: number | null;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onSelectSource: () => void;
   isReadOnly: boolean;
@@ -64,6 +65,7 @@ export default function DistillationPanel({
   setMarkdownText,
   onSaveMarkdown,
   highlightPhrase,
+  highlightSourceWordIndex = null,
   saveStatus,
   onSelectSource,
   isReadOnly
@@ -103,6 +105,54 @@ export default function DistillationPanel({
     URL.revokeObjectURL(url);
   };
 
+  const transcriptLineIndex = (markdown: string, phrase: string, sourceWordIndex: number | null) => {
+    const lines = markdown.split('\n');
+    const transcriptHeadingIndex = lines.findIndex((line) => /^#{1,6}\s+Transcript\b/i.test(line.trim()));
+    if (transcriptHeadingIndex === -1) return -1;
+
+    const phraseTokens = phrase.match(/[^\W_]+(?:['’][^\W_]+)?/gu)?.map((token) => token.toLocaleLowerCase()) || [];
+    const transcriptLines = lines.slice(transcriptHeadingIndex + 1).map((line, offset) => ({
+      line,
+      index: transcriptHeadingIndex + 1 + offset,
+    }));
+    const candidates: Array<{ index: number; distance: number }> = [];
+    let sourceLineWordStart = 0;
+
+    for (const item of transcriptLines) {
+      if (/^#{1,6}\s+/.test(item.line.trim())) break;
+      const content = item.line.replace(/^\s*\[[^\]]+\]\s+[^:]+:\s*/, '');
+      const lineTokens = content.match(/[^\W_]+(?:['’][^\W_]+)?/gu)?.map((token) => token.toLocaleLowerCase()) || [];
+      if (lineTokens.length > 0 && phraseTokens.length > 0) {
+        for (let start = 0; start <= lineTokens.length - phraseTokens.length; start += 1) {
+          if (!phraseTokens.every((token, offset) => token === lineTokens[start + offset])) continue;
+          candidates.push({
+            index: item.index,
+            // The anchor is inside the cue phrase, so its fixed offset does not
+            // change which repeated phrase is closest to the canonical index.
+            distance: sourceWordIndex === null ? candidates.length : Math.abs(sourceLineWordStart + start - sourceWordIndex),
+          });
+        }
+      }
+      if (lineTokens.length > 0) sourceLineWordStart += lineTokens.length;
+    }
+
+    if (candidates.length > 0) {
+      return candidates.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best).index;
+    }
+
+    if (sourceWordIndex !== null) {
+      let wordIndex = 0;
+      for (const item of transcriptLines) {
+        if (/^#{1,6}\s+/.test(item.line.trim())) break;
+        const content = item.line.replace(/^\s*\[[^\]]+\]\s+[^:]+:\s*/, '');
+        const wordCount = content.match(/[^\W_]+(?:['’][^\W_]+)?/gu)?.length || 0;
+        if (sourceWordIndex < wordIndex + wordCount) return item.index;
+        if (wordCount > 0) wordIndex += wordCount;
+      }
+    }
+    return -1;
+  };
+
   useEffect(() => {
     if (!highlightPhrase || viewMode !== 'rich') return;
     const highlightedTurn = contentRef.current
@@ -113,20 +163,20 @@ export default function DistillationPanel({
   useEffect(() => {
     if (!highlightPhrase || viewMode !== 'raw') return;
     const editor = markdownEditorRef.current;
-    const transcriptHeading = /^#{1,6}\s+Transcript\b.*$/im.exec(markdownText);
-    const transcriptStart = transcriptHeading ? transcriptHeading.index + transcriptHeading[0].length : 0;
-    const phraseStart = markdownText.toLocaleLowerCase().indexOf(highlightPhrase.toLocaleLowerCase(), transcriptStart);
-    if (!editor || phraseStart === -1) return;
-    const turnStart = markdownText.lastIndexOf('\n', phraseStart) + 1;
-    const turnEnd = markdownText.indexOf('\n', phraseStart);
+    const targetLine = transcriptLineIndex(markdownText, highlightPhrase, highlightSourceWordIndex);
+    if (!editor || targetLine === -1) return;
+    const lines = markdownText.split('\n');
+    const turnStart = lines.slice(0, targetLine).reduce((offset, line) => offset + line.length + 1, 0);
+    const turnEnd = turnStart + lines[targetLine].length;
     editor.focus({ preventScroll: true });
-    editor.setSelectionRange(turnStart, turnEnd === -1 ? markdownText.length : turnEnd);
+    editor.setSelectionRange(turnStart, turnEnd);
     editor.scrollTop = turnStart / Math.max(1, markdownText.length) * Math.max(0, editor.scrollHeight - editor.clientHeight);
-  }, [highlightPhrase, markdownText, viewMode]);
+  }, [highlightPhrase, highlightSourceWordIndex, markdownText, viewMode]);
 
-  const highlightText = (text: string, shouldHighlight = true): React.ReactNode => {
+  const highlightText = (text: string, shouldHighlight = true, lineIndex?: number, targetLineIndex?: number): React.ReactNode => {
     const phrase = highlightPhrase?.trim();
     if (!phrase || !shouldHighlight) return text;
+    if (highlightSourceWordIndex !== null && lineIndex !== targetLineIndex) return text;
     if (text.toLocaleLowerCase().includes(phrase.toLocaleLowerCase())) {
       return <mark data-mention-highlight="true" className="rounded bg-amber-400/35 px-0.5 text-main-canvas">{text}</mark>;
     }
@@ -152,6 +202,9 @@ export default function DistillationPanel({
     }
 
     const lines = cleanedMd.split('\n');
+    const targetLine = highlightPhrase
+      ? transcriptLineIndex(cleanedMd, highlightPhrase, highlightSourceWordIndex)
+      : -1;
     let inQuote = false;
     let quoteLines: string[] = [];
     let inTranscript = false;
@@ -236,7 +289,7 @@ export default function DistillationPanel({
             <span className={`text-sm font-sans leading-relaxed transition-all ${
               isChecked ? 'text-muted-canvas line-through' : 'text-main-canvas'
             }`}>
-              {highlightText(typeof renderedText === 'string' ? renderedText : text, inTranscript)}
+              {highlightText(typeof renderedText === 'string' ? renderedText : text, inTranscript, idx, targetLine)}
             </span>
           </div>
         );
@@ -248,7 +301,7 @@ export default function DistillationPanel({
         return (
           <li key={idx} className="list-none flex items-start space-x-2 my-2 text-sm text-muted-canvas pl-0.5">
             <span className="mt-2 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-muted-canvas" />
-            <span>{highlightText(text, inTranscript)}</span>
+            <span>{highlightText(text, inTranscript, idx, targetLine)}</span>
           </li>
         );
       }
@@ -261,14 +314,14 @@ export default function DistillationPanel({
           return (
             <div key={idx} className="flex items-start space-x-2.5 my-2.5 text-sm text-muted-canvas font-sans pl-0.5">
               <span className="font-mono text-main-canvas text-xs font-semibold">{matchNumber[1]}.</span>
-              <span>{highlightText(matchNumber[2], inTranscript)}</span>
+              <span>{highlightText(matchNumber[2], inTranscript, idx, targetLine)}</span>
             </div>
           );
         }
 
         return (
           <p key={idx} className={`text-sm text-muted-canvas font-sans ${inTranscript ? 'my-0.5 leading-5' : 'leading-relaxed my-2.5'}`}>
-            {highlightText(trimmed, inTranscript)}
+            {highlightText(trimmed, inTranscript, idx, targetLine)}
           </p>
         );
       }

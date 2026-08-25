@@ -28,15 +28,32 @@ chmod 600 ~/.config/vidscribe/api_keys.env
 
 The service also accepts shell environment variables and the repository-local
 `.env` or `api_keys.env` files; those are useful for isolated development and
-tests. Run the service and UI in separate terminals:
+tests.
+
+### Start the API and UI
+
+Run both processes in separate terminals. The UI requires the API for picker,
+session, review, and snapshot functionality.
 
 ```bash
+# Terminal 1 — FastAPI backend
 .venv/bin/python -m vidscribe
+
+# Terminal 2 — Vite frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 The API listens on `127.0.0.1:8000` and rejects non-loopback hosts. Session
 state defaults to `~/Library/Application Support/Vidscribe`.
+
+Open <http://127.0.0.1:5173/> after both processes are running. Verify the API
+with:
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+Expected response: `{"status":"ok"}`.
 
 Source and Destination paths enter the service only through native picker
 capabilities. The browser receives an opaque `selection_id` for Session creation;

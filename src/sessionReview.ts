@@ -137,6 +137,7 @@ export function toReview(
       subject: snapshot.subject,
       cuePhrase: snapshot.cue_phrase,
       anchorWord: snapshot.anchor_word || cleanMentionTag(session.transcript_word_timings?.[snapshot.source_word_index]?.word || ''),
+      sourceWordIndex: snapshot.source_word_index,
       speakerLabel: snapshot.speaker_label || 'Unknown speaker',
       kind: snapshot.kind || 'detail',
       imageUrl: snapshotUrl(session.id, attemptId, snapshot.filename),

@@ -76,6 +76,7 @@ export default function App() {
   const [isCommitting, setIsCommitting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeMentionPhrase, setActiveMentionPhrase] = useState<string | null>(null);
+  const [activeMentionSourceWordIndex, setActiveMentionSourceWordIndex] = useState<number | null>(null);
   const [isSystemPromptOpen, setIsSystemPromptOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [systemPromptContract, setSystemPromptContract] = useState<Record<string, unknown> | null>(null);
@@ -493,6 +494,7 @@ export default function App() {
               }}
               onSaveMarkdown={() => saveReview({ session_record_markdown: reviewMarkdown }, markdownVersionRef.current)}
               highlightPhrase={activeMentionPhrase}
+              highlightSourceWordIndex={activeMentionSourceWordIndex}
               saveStatus={saveStatus}
               onSelectSource={selectSource}
               isReadOnly={isReviewReadOnly}
@@ -515,7 +517,10 @@ export default function App() {
                   })),
                 });
               }}
-              onMentionSelect={setActiveMentionPhrase}
+              onMentionSelect={(phrase, sourceWordIndex) => {
+                setActiveMentionPhrase(phrase);
+                setActiveMentionSourceWordIndex(sourceWordIndex ?? null);
+              }}
               saveStatus={saveStatus}
               onCommit={commitReview}
               canCommit={canCommit}

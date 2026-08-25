@@ -208,6 +208,7 @@ export interface DistillationResult {
     subject: string;
     cuePhrase: string;
     anchorWord: string;
+    sourceWordIndex?: number;
     speakerLabel: string;
     kind: 'overview' | 'detail';
     imageUrl?: string;
