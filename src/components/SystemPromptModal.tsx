@@ -38,11 +38,8 @@ export default function SystemPromptModal({ isOpen, value, lockedContract, isLoa
 
   return (
     <GlassModal isOpen={isOpen} onClose={onClose} title="System prompt" size="full" minimal>
-      <div
-        data-modal-backdrop="true"
-        className="relative mx-auto h-[82vh] w-full"
-      >
-        <section className="mx-auto flex h-full w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-muted-canvas bg-panel-canvas shadow-2xl">
+      <div className="pointer-events-none relative mx-auto h-[82vh] w-full">
+        <section className="pointer-events-auto mx-auto flex h-full w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-muted-canvas bg-panel-canvas shadow-2xl">
           <header className="flex items-center justify-between gap-5 px-6 py-4">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold tracking-tight text-main-canvas">System prompt</h2>
@@ -91,7 +88,7 @@ export default function SystemPromptModal({ isOpen, value, lockedContract, isLoa
           </footer>
         </section>
 
-        <aside className="absolute top-0 left-1/2 ml-[370px] hidden max-h-full w-[280px] overflow-y-auto rounded-2xl border border-muted-canvas bg-panel-canvas px-6 py-6 shadow-xl xl:block">
+        <aside className="pointer-events-auto absolute top-0 left-1/2 ml-[370px] hidden max-h-full w-[280px] overflow-y-auto rounded-2xl border border-muted-canvas bg-panel-canvas px-6 py-6 shadow-xl xl:block">
           <div className="space-y-2 border-b border-muted-canvas pb-6">
             <div className="flex items-center gap-2 text-main-canvas">
               <FileText size={15} className="text-orange-500" />

@@ -457,7 +457,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                             src={snapshot.imageUrl}
                             alt={snapshot.filename}
                             referrerPolicy="no-referrer"
-                            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-102"
+                            className={`h-full w-full object-cover transition-[transform,opacity] duration-200 group-hover:scale-102 ${!snapshot.kept ? 'opacity-35 group-hover:opacity-100' : ''}`}
                           />
                         </div>
                       ) : (
@@ -623,7 +623,13 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
         <div
           data-snapshot-hover-preview="true"
           style={{ left: hoveredSnapshot.left, top: hoveredSnapshot.top, width: hoveredSnapshot.width, height: hoveredSnapshot.height }}
-          className="pointer-events-none fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
+          onPointerLeave={(event) => {
+            if (!isWithinSnapshotHover(event.relatedTarget)) {
+              setHoveredSnapshot(null);
+              if (!activeSnapshot) onMentionSelect(null);
+            }
+          }}
+          className="fixed z-[55] overflow-hidden rounded border border-active-canvas bg-input-canvas shadow-2xl"
         >
           <button type="button" onClick={() => setActiveSnapshotFilename(hoveredSnapshotData.filename)} className="absolute inset-0 w-full text-left">
             {hoveredSnapshotData.imageUrl ? (

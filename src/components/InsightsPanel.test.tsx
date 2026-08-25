@@ -157,11 +157,37 @@ it('renders an unclipped 1.5× snapshot hover layer and selects its transcript c
   const hoverPreview = Array.from(document.querySelectorAll<HTMLElement>('[data-snapshot-hover-preview="true"]')).at(-1);
   expect(hoverPreview).not.toBeNull();
   expect(hoverPreview).toHaveStyle({ left: '80px', top: '187.5px', width: '120px', height: '75px' });
-  expect(hoverPreview).toHaveClass('fixed', 'pointer-events-none');
+  expect(hoverPreview).toHaveClass('fixed');
+  expect(hoverPreview).not.toHaveClass('pointer-events-none');
   expect(onMentionSelect).toHaveBeenLastCalledWith('look at this door');
+
+  fireEvent.pointerLeave(snapshotCard!, { relatedTarget: hoverPreview });
+  expect(document.querySelector('[data-snapshot-hover-preview="true"]')).toBeInTheDocument();
+
+  fireEvent.pointerLeave(hoverPreview!, { relatedTarget: document.body });
+  expect(hoverPreview).not.toBeInTheDocument();
 
   await user.click(snapshotButton);
   expect(onMentionSelect).toHaveBeenCalledWith('look at this door');
+});
+
+it('mutes a rejected Snapshot thumbnail but restores it in the hover preview', () => {
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [], mentions: [], agentNotes: [], filesystem: [],
+        snapshots: [{ filename: '01-rejected.jpg', time: '00:10', subject: 'Rejected frame', cuePhrase: 'look at the rejected frame', anchorWord: 'rejected', speakerLabel: 'Developer', kind: 'detail', kept: false, imageUrl: '/api/rejected.jpg' }],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const thumbnail = view.getByAltText('01-rejected.jpg');
+  expect(thumbnail).toHaveClass('opacity-35');
+  fireEvent.pointerEnter(thumbnail.closest<HTMLElement>('[data-snapshot-card]')!);
+  const hoverPreview = Array.from(document.querySelectorAll<HTMLElement>('[data-snapshot-hover-preview="true"]')).at(-1);
+  expect(hoverPreview?.querySelector('img')).not.toHaveClass('opacity-35');
 });
 
 it('applies one mention correction to every grouped source range', async () => {
