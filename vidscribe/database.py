@@ -297,11 +297,11 @@ class SessionRepository:
             ).fetchone()
             if row is None:
                 raise KeyError(fingerprint)
-            if row["status"] != "completed":
-                connection.execute(
-                    "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
-                    (str(source_path.resolve()), now, row["id"]),
-                )
+            # A completed session may have moved its source during commit; the selected file is authoritative now.
+            connection.execute(
+                "UPDATE sessions SET source_path = ?, updated_at = ? WHERE id = ?",
+                (str(source_path.resolve()), now, row["id"]),
+            )
         return self.get(row["id"])
 
     def recover_interrupted_sessions(self) -> None:
@@ -359,6 +359,10 @@ class SessionRepository:
             "finalizing_attempt_id",
             "finalizing_service_id",
             "finalizing_cross_volume",
+            "extra_instructions",
+            "speaker_hints",
+            "extraction_options",
+            "attachment_paths",
         }
         unexpected = set(changes) - allowed
         if unexpected:
@@ -367,6 +371,12 @@ class SessionRepository:
             return self.get(session_id)
         if "transcript_word_timings" in changes:
             changes["transcript_word_timings"] = json.dumps(changes["transcript_word_timings"])
+        if "speaker_hints" in changes:
+            changes["speaker_hints"] = json.dumps(changes["speaker_hints"])
+        if "extraction_options" in changes:
+            changes["extraction_options"] = json.dumps(changes["extraction_options"])
+        if "attachment_paths" in changes:
+            changes["attachment_paths"] = json.dumps(changes["attachment_paths"])
         changes["updated_at"] = datetime.now(UTC).isoformat()
         assignments = ", ".join(f"{field} = ?" for field in changes)
         with self.connection() as connection:

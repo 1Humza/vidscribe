@@ -1,0 +1,17 @@
+{
+  "name": "Speech Distiller",
+  "short_name": "Speech Distiller",
+  "description": "Turn recordings into focused, reviewable session records.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171717",
+  "theme_color": "#171717",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

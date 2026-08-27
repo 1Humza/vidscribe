@@ -78,7 +78,7 @@ export default function GlassModal({ isOpen, onClose, title, children, size = 'l
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-            className={`relative w-full ${sizeClasses[size]} z-10 ${minimal ? 'pointer-events-none' : 'overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas p-5 shadow-xl'}`}
+            className={`relative w-full ${sizeClasses[size]} z-10 ${minimal ? 'pointer-events-auto' : 'overflow-hidden rounded-xl border border-muted-canvas bg-panel-canvas p-5 shadow-xl'}`}
           >
             {!minimal && (
               <div className="flex items-center justify-between border-b border-muted-canvas pb-3 mb-3">

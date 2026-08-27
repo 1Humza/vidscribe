@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, updateReview, updateSessionDestination, updateSystemPrompt, type SessionEvent } from './api';
+import { AlertCircle, Check, ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
+import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, selectDestinationPath as resolveDestinationPath, selectSourcePath as resolveSourcePath, updateReview, updateSessionDestination, updateSystemPrompt, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -14,7 +14,7 @@ import type {
   SelectedSource,
   SessionViewDto,
 } from './types';
-import { fileName, toReview } from './sessionReview';
+import { fileName, matchingMentionRanges, toReview } from './sessionReview';
 
 
 const ACTIVE_SESSION_KEY = 'vidscribe.activeSessionId';
@@ -71,6 +71,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processTime, setProcessTime] = useState('00:00');
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [errorCopied, setErrorCopied] = useState(false);
   const [pickerBusy, setPickerBusy] = useState<'source' | 'destination' | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'fading'>('idle');
   const [isCommitting, setIsCommitting] = useState(false);
@@ -110,6 +111,7 @@ export default function App() {
     selectedSource?: SelectedSource,
     preserveMarkdownDraft = false,
     clearAnalysisPreview = false,
+    preserveIntakeDraft = false,
   ) => {
     setSession(next);
     setSource((current) => ({
@@ -130,13 +132,15 @@ export default function App() {
     } else {
       setDestination(null);
     }
-    const intake = intakeFromSession(next.extra_instructions || '', next.speaker_hints);
-    setContext(intake.context);
-    setSpeakers(intake.speakers);
-    setAttachments((next.attachment_paths || []).map((path) => ({ path, name: fileName(path) })));
-    setExtractionOptions(next.extraction_options);
-    setModel(next.model);
-    setEffort(next.effort);
+    if (!preserveIntakeDraft) {
+      const intake = intakeFromSession(next.extra_instructions || '', next.speaker_hints);
+      setContext(intake.context);
+      setSpeakers(intake.speakers);
+      setAttachments((next.attachment_paths || []).map((path) => ({ path, name: fileName(path) })));
+      setExtractionOptions(next.extraction_options);
+      setModel(next.model);
+      setEffort(next.effort);
+    }
     const attempt = next.attempts.at(-1);
     if (attempt?.result) {
       if (!preserveMarkdownDraft) setReviewMarkdown(attempt.result.session_record_markdown);
@@ -158,7 +162,11 @@ export default function App() {
     if (!sessionId) return;
     const controller = new AbortController();
     getSession(sessionId, controller.signal)
-      .then((restored) => applySession(restored))
+      .then((restored) => {
+        applySession(restored);
+        const failure = restored.status === 'error' ? restored.attempts.at(-1)?.error : null;
+        if (failure) setErrorNotice(failure);
+      })
       .catch(() => {
         if (!controller.signal.aborted) window.localStorage.removeItem(ACTIVE_SESSION_KEY);
       });
@@ -196,20 +204,23 @@ export default function App() {
     };
   }, [saveStatus]);
 
-  useEffect(() => {
-    if (!errorNotice) return;
-    const dismiss = window.setTimeout(() => setErrorNotice(null), 6000);
-    return () => window.clearTimeout(dismiss);
-  }, [errorNotice]);
-
   const selectSource = async () => {
     setPickerBusy('source');
     setErrorNotice(null);
     try {
       const selected = await pickSource(source?.path);
+      await applySourceSelection(selected);
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The source picker failed.'));
+    } finally {
+      setPickerBusy(null);
+    }
+  };
+
+  const applySourceSelection = async (selected: Awaited<ReturnType<typeof pickSource>>) => {
       if (selected.media_kind === null) {
         applySession(await openCompletedSession(selected.selection_id));
-        return;
+        return true;
       }
       const selectedSource = {
         selectionId: selected.selection_id,
@@ -230,10 +241,36 @@ export default function App() {
       setSaveStatus('idle');
       const restored = await openSourceSession(selected.selection_id);
       if (restored) applySession(restored, selectedSource);
+      return true;
+  };
+
+  const selectSourcePath = async (path: string) => {
+    setPickerBusy('source');
+    setErrorNotice(null);
+    try {
+      await applySourceSelection(await resolveSourcePath(path));
+      return true;
     } catch (error) {
-      setErrorNotice(errorMessage(error, 'The source picker failed.'));
+      setErrorNotice(errorMessage(error, 'The source path could not be selected.'));
+      return false;
     } finally {
       setPickerBusy(null);
+    }
+  };
+
+  const applyDestinationSelection = async (selected: Awaited<ReturnType<typeof pickDestination>>, preserveSession: boolean) => {
+    const selectedDestination = { selectionId: selected.selection_id, path: selected.path, name: selected.name };
+    if (preserveSession && session) {
+      const updated = await updateSessionDestination(session.id, selected.selection_id);
+      setSession((current) => current ? { ...current, destination_path: updated.destination_path } : updated);
+      setDestination(selectedDestination);
+    } else {
+      setDestination(selectedDestination);
+      setSession(null);
+      setAnalysisPreview('');
+      setReviewMarkdown('');
+      setAttachments([]);
+      window.localStorage.removeItem(ACTIVE_SESSION_KEY);
     }
   };
 
@@ -242,21 +279,23 @@ export default function App() {
     setErrorNotice(null);
     try {
       const selected = await pickDestination(destination?.path);
-      const selectedDestination = { selectionId: selected.selection_id, path: selected.path, name: selected.name };
-      if (preserveSession && session) {
-        const updated = await updateSessionDestination(session.id, selected.selection_id);
-        setSession((current) => current ? { ...current, destination_path: updated.destination_path } : updated);
-        setDestination(selectedDestination);
-      } else {
-        setDestination(selectedDestination);
-        setSession(null);
-        setAnalysisPreview('');
-        setReviewMarkdown('');
-        setAttachments([]);
-        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
-      }
+      await applyDestinationSelection(selected, preserveSession);
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The destination picker failed.'));
+    } finally {
+      setPickerBusy(null);
+    }
+  };
+
+  const selectDestinationPath = async (path: string) => {
+    setPickerBusy('destination');
+    setErrorNotice(null);
+    try {
+      await applyDestinationSelection(await resolveDestinationPath(path), true);
+      return true;
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The output path could not be selected.'));
+      return false;
     } finally {
       setPickerBusy(null);
     }
@@ -277,7 +316,7 @@ export default function App() {
   const handleEvent = (event: SessionEvent) => {
     if (event.type === 'session' || event.type === 'complete') {
       if (event.data.status === 'processing') setIsRestarting(false);
-      applySession(event.data, undefined, false, event.type === 'session' && event.data.status === 'processing');
+      applySession(event.data, undefined, false, event.type === 'session' && event.data.status === 'processing', true);
       if (event.type === 'complete') setIsProcessing(false);
       return;
     }
@@ -318,20 +357,28 @@ export default function App() {
     setProcessTime('00:00');
     requestAnimationFrame(() => outputRef.current?.scrollIntoView({ behavior: 'smooth' }));
     try {
+      const speakerHints = speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean);
+      const attachmentSelectionIds = attachments.map((attachment) => attachment.selectionId).filter((id): id is string => Boolean(id));
       const active = session || await createSession({
-        sourceSelectionId: source.selectionId!,
-        destinationSelectionId: destination?.selectionId,
-        extraInstructions: context,
-        speakerHints: speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean),
-        extractionOptions,
-        model,
-        effort,
-        attachmentSelectionIds: attachments.map((attachment) => attachment.selectionId).filter((id): id is string => Boolean(id)),
-      });
-      applySession(active);
+          sourceSelectionId: source.selectionId!,
+          destinationSelectionId: destination?.selectionId,
+          extraInstructions: context,
+          speakerHints,
+          extractionOptions,
+          model,
+          effort,
+          attachmentSelectionIds,
+        });
+      if (!session) applySession(active);
       const controller = new AbortController();
       executeAbortRef.current = controller;
-      await executeSession(active.id, handleEvent, { model, effort }, controller.signal);
+      await executeSession(active.id, handleEvent, {
+        model,
+        effort,
+        extraInstructions: context,
+        speakerHints,
+        extractionOptions,
+      }, controller.signal);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setErrorNotice(errorMessage(error, 'The session could not be executed.'));
@@ -412,6 +459,16 @@ export default function App() {
     setErrorNotice('Execution was stopped. The source media remains untouched.');
   };
 
+  const copyError = async () => {
+    if (!errorNotice || !window.navigator.clipboard?.writeText) return;
+    try {
+      await window.navigator.clipboard.writeText(errorNotice);
+      setErrorCopied(true);
+    } catch {
+      setErrorCopied(false);
+    }
+  };
+
   const commitReview = async () => {
     const attempt = session?.attempts.at(-1);
     if (!session || !attempt?.result || !canCommit) return;
@@ -440,9 +497,17 @@ export default function App() {
   return (
     <div className="h-screen w-full overflow-y-scroll scroll-smooth bg-app-canvas text-main-canvas font-sans select-none relative transition-colors duration-200">
       {errorNotice && (
-        <div role="alert" className="fixed z-[60] top-16 left-1/2 -translate-x-1/2 w-[min(92vw,700px)] p-3 rounded-xl border border-rose-500/30 bg-panel-canvas text-rose-500 text-sm flex justify-between items-center shadow-lg">
-          <span className="flex items-center gap-2"><AlertCircle size={16} />{errorNotice}</span>
-          <button aria-label="Dismiss error" onClick={() => setErrorNotice(null)} className="p-1 rounded-lg hover:bg-input-canvas"><X size={14} /></button>
+        <div role="alert" className="fixed z-[60] top-16 left-1/2 -translate-x-1/2 w-[min(92vw,700px)] p-3 rounded-xl border border-rose-500/30 bg-panel-canvas text-rose-500 text-sm flex items-start justify-between gap-3 shadow-lg">
+          <div className="flex min-w-0 items-start gap-2 select-text cursor-text">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <span className="break-words">{errorNotice}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button aria-label={errorCopied ? 'Error copied' : 'Copy error'} title={errorCopied ? 'Error copied' : 'Copy error'} onClick={() => void copyError()} className="p-1 rounded-lg hover:bg-input-canvas">
+              {errorCopied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+            <button aria-label="Dismiss error" onClick={() => { setErrorCopied(false); setErrorNotice(null); }} className="p-1 rounded-lg hover:bg-input-canvas"><X size={14} /></button>
+          </div>
         </div>
       )}
 
@@ -451,6 +516,7 @@ export default function App() {
           <IntakePanel
             source={source}
             onSelectSource={selectSource}
+            onSelectSourcePath={selectSourcePath}
             onClearSource={clearSource}
             pickerBusy={pickerBusy}
             context={context}
@@ -543,6 +609,21 @@ export default function App() {
                   })),
                 });
               }}
+              onMentionAdd={(sourcePhrase, replacement) => {
+                const ranges = matchingMentionRanges(session?.transcript_word_timings || [], sourcePhrase);
+                if (!ranges.length) {
+                  setErrorNotice('That phrase was not found in the transcript.');
+                  return false;
+                }
+                void saveReview({
+                  phrase_corrections: ranges.map((range) => ({
+                    source_word_start: range.sourceWordStart,
+                    source_word_end: range.sourceWordEnd,
+                    replacement,
+                  })),
+                });
+                return true;
+              }}
               onMentionSelect={(phrase, sourceWordIndex, anchorWord) => {
                 setActiveMentionPhrase(phrase);
                 setActiveMentionSourceWordIndex(sourceWordIndex ?? null);
@@ -553,6 +634,7 @@ export default function App() {
               canCommit={canCommit}
               destination={destination}
               onSelectDestination={() => void selectDestination(true)}
+              onSelectDestinationPath={selectDestinationPath}
               pickerBusy={pickerBusy}
               isCommitPending={isCommitting}
               isReadOnly={isReviewReadOnly}

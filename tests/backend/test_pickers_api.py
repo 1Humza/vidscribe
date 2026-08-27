@@ -104,6 +104,30 @@ def test_service_owned_picker_capabilities_are_required_for_session_paths(
     assert raw_paths.status_code == 422
 
 
+def test_pasted_source_and_destination_paths_issue_picker_capabilities(tmp_path: Path) -> None:
+    source = tmp_path / "pCloud Local" / "18 Backlog" / "10 Recordings" / "2026-07-13 15-55-01.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video")
+    destination = tmp_path / "records"
+    destination.mkdir()
+
+    with TestClient(create_app(Settings(data_dir=tmp_path / "data"))) as client:
+        selected_source = client.post("/api/pickers/source-path", json={"path": str(source)})
+        quoted_source = client.post("/api/pickers/source-path", json={"path": f"'{source}'"})
+        selected_destination = client.post("/api/pickers/destination-path", json={"path": str(destination)})
+        relative_source = client.post("/api/pickers/source-path", json={"path": "capture.mp4"})
+
+    assert selected_source.status_code == 200
+    assert selected_source.json()["path"] == str(source.resolve())
+    assert selected_source.json()["media_kind"] == "video"
+    assert quoted_source.status_code == 200
+    assert quoted_source.json()["path"] == str(source.resolve())
+    assert selected_destination.status_code == 200
+    assert selected_destination.json()["path"] == str(destination.resolve())
+    assert relative_source.status_code == 422
+    assert relative_source.json()["detail"] == "Pasted path must be absolute"
+
+
 def test_session_can_be_created_before_an_output_folder_is_selected(tmp_path: Path) -> None:
     source = tmp_path / "capture.mp4"
     source.write_bytes(b"video")

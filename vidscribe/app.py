@@ -20,6 +20,8 @@ from vidscribe.models import (
     ExecuteSessionRequest,
     OpenCompletedSessionRequest,
     OpenSourceSessionRequest,
+    SessionIntakeUpdateRequest,
+    PathSelectionRequest,
     PickerRequest,
     PickerSelection,
     ReviewUpdate,
@@ -120,6 +122,33 @@ def create_app(
         except OSError:
             return session
 
+    def pasted_path(raw_path: str) -> Path:
+        value = raw_path.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            # Shell-style quoting is common when copying paths with spaces from Finder or Terminal.
+            value = value[1:-1].strip()
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            raise HTTPException(status_code=422, detail="Pasted path must be absolute")
+        try:
+            return path.resolve()
+        except OSError as error:
+            raise HTTPException(status_code=422, detail="Pasted path could not be resolved") from error
+
+    def source_file_selection(selected: Path) -> PickerSelection:
+        if not selected.is_file():
+            raise HTTPException(status_code=422, detail="Source Media must be an existing file")
+        audio_extensions = {".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".wav"}
+        return PickerSelection(
+            selection_id=selections.issue("source", selected),
+            path=str(selected),
+            name=selected.name,
+            media_kind="audio" if selected.suffix.lower() in audio_extensions else "video",
+            size_bytes=selected.stat().st_size,
+            duration_seconds=probe_duration(selected, app_settings.ffprobe_path),
+            source_date=infer_session_date(selected, app_settings.ffprobe_path),
+        )
+
     @app.middleware("http")
     async def enforce_loopback_host(request: Request, call_next):
         hostname = (request.url.hostname or "").lower()
@@ -164,7 +193,7 @@ def create_app(
             )
             attachments = [
                 selections.resolve(selection_id, "attachment")
-                for selection_id in request.attachment_selection_ids
+                for selection_id in request.attachment_selection_ids or []
             ]
         except KeyError as error:
             raise HTTPException(
@@ -209,6 +238,29 @@ def create_app(
             raise HTTPException(status_code=422, detail="Destination must be an existing directory")
         return repository.update_session(session_id, destination_path=str(destination.resolve()))
 
+    @app.patch("/api/sessions/{session_id}/intake", response_model=SessionView)
+    def update_session_intake(session_id: str, request: SessionIntakeUpdateRequest) -> SessionView:
+        try:
+            session = repository.get(session_id)
+            attachments = [
+                selections.resolve(selection_id, "attachment")
+                for selection_id in request.attachment_selection_ids or []
+            ]
+        except KeyError as error:
+            raise HTTPException(status_code=422, detail="Picker selection is invalid or expired") from error
+        if session.status in {"processing", "finalizing"}:
+            raise HTTPException(status_code=409, detail="Session intake cannot be changed while this Session is active")
+        if any(not attachment.is_file() for attachment in attachments):
+            raise HTTPException(status_code=422, detail="Attached Context must be existing files")
+        changes: dict[str, object] = {
+            "extra_instructions": request.extra_instructions,
+            "speaker_hints": request.speaker_hints,
+            "extraction_options": request.extraction_options.model_dump(),
+        }
+        if request.attachment_selection_ids is not None:
+            changes["attachment_paths"] = [str(attachment) for attachment in attachments]
+        return repository.update_session(session_id, **changes)
+
     @app.post("/api/sessions/open-source", response_model=SessionView)
     def open_source_session(request: OpenSourceSessionRequest) -> SessionView:
         try:
@@ -241,19 +293,11 @@ def create_app(
                 name=selected.name,
                 media_kind=None,
             )
-        if not selected.is_file():
-            raise HTTPException(status_code=422, detail="Selected Source Media is not a file or folder")
-        audio_extensions = {".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".wav"}
-        resolved = selected.resolve()
-        return PickerSelection(
-            selection_id=selections.issue("source", resolved),
-            path=str(resolved),
-            name=selected.name,
-            media_kind="audio" if selected.suffix.lower() in audio_extensions else "video",
-            size_bytes=resolved.stat().st_size,
-            duration_seconds=probe_duration(resolved, app_settings.ffprobe_path),
-            source_date=infer_session_date(resolved, app_settings.ffprobe_path),
-        )
+        return source_file_selection(selected.resolve())
+
+    @app.post("/api/pickers/source-path", response_model=PickerSelection)
+    def choose_source_path(request: PathSelectionRequest) -> PickerSelection:
+        return source_file_selection(pasted_path(request.path))
 
     @app.post("/api/sessions/open-completed", response_model=SessionView)
     def open_completed_session(request: OpenCompletedSessionRequest) -> SessionView:
@@ -307,6 +351,17 @@ def create_app(
         return PickerSelection(
             selection_id=selections.issue("destination", selected),
             path=str(selected.resolve()),
+            name=selected.name,
+        )
+
+    @app.post("/api/pickers/destination-path", response_model=PickerSelection)
+    def choose_destination_path(request: PathSelectionRequest) -> PickerSelection:
+        selected = pasted_path(request.path)
+        if not selected.is_dir():
+            raise HTTPException(status_code=422, detail="Destination must be an existing directory")
+        return PickerSelection(
+            selection_id=selections.issue("destination", selected),
+            path=str(selected),
             name=selected.name,
         )
 
@@ -417,7 +472,9 @@ def create_app(
         except RuntimeError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         session = claim.session
-        if session.status == "completed" or session.completed_folder_path is not None:
+        if session.status == "completed" or (
+            session.completed_folder_path is not None and not claim.resumes_finalization
+        ):
             attempt = next(item for item in session.attempts if item.id == attempt_id)
             assert attempt.result is not None
             try:
@@ -465,8 +522,17 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from error
         if session.status in {"processing", "finalizing"}:
             raise HTTPException(status_code=409, detail="Session is already processing or committing")
+        changes: dict[str, object] = {}
         if request.model is not None and request.effort is not None:
-            repository.update_session(session_id, model=request.model, effort=request.effort)
+            changes.update(model=request.model, effort=request.effort)
+        if request.extra_instructions is not None:
+            changes["extra_instructions"] = request.extra_instructions
+        if request.speaker_hints is not None:
+            changes["speaker_hints"] = request.speaker_hints
+        if request.extraction_options is not None:
+            changes["extraction_options"] = request.extraction_options.model_dump()
+        if changes:
+            repository.update_session(session_id, **changes)
         return StreamingResponse(
             pipeline.execute(session_id),
             media_type="text/event-stream",

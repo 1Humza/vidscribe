@@ -35,6 +35,7 @@ it('allows Final Review to remove a proposed Snapshot', async () => {
       onReviewEdit={vi.fn()}
       onSnapshotKeep={onSnapshotKeep}
       onMentionCorrect={vi.fn()}
+      onMentionAdd={vi.fn(() => true)}
       onMentionSelect={vi.fn()}
       saveStatus="idle"
       onCommit={vi.fn()}
@@ -58,7 +59,7 @@ it('edits a terminology Mention tag without dismissing it', async () => {
   const onMentionSelect = vi.fn();
   const user = userEvent.setup();
 
-  render(
+  const view = render(
     <InsightsPanel
       result={{
         title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [],
@@ -66,18 +67,129 @@ it('edits a terminology Mention tag without dismissing it', async () => {
         agentNotes: [], filesystem: [], snapshots: [],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={onMentionCorrect} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={onMentionCorrect} onMentionAdd={vi.fn(() => true)} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 
   await user.click(screen.getByRole('button', { name: 'reclass plug in' }));
-  expect(onMentionSelect).toHaveBeenCalledWith('reclass plug in');
+  expect(onMentionSelect).toHaveBeenCalledWith('reclass plug in', 2);
   const input = screen.getByRole('textbox', { name: 'Correct reclass plug in' });
   await user.clear(input);
   await user.type(input, 'Reclass plugin{Enter}');
 
   expect(onMentionCorrect).toHaveBeenCalledWith([{ sourceWordStart: 2, sourceWordEnd: 3 }], 'Reclass plugin');
   expect(onMentionSelect).toHaveBeenLastCalledWith(null);
+});
+
+it('hides a Mention tooltip while its tag is being edited', async () => {
+  const user = userEvent.setup();
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [],
+        mentions: [{ id: '2-3', tag: 'reclass plug in', time: '01:50', context: 'I use the reclass plug in here', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 3 }] }],
+        agentNotes: [], filesystem: [], snapshots: [],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const query = within(view.container);
+  const mention = query.getByRole('button', { name: 'reclass plug in' });
+  await user.hover(mention);
+  expect(screen.getAllByRole('tooltip').at(-1)).toBeInTheDocument();
+  await user.click(mention);
+
+  expect(query.getByRole('textbox', { name: 'Correct reclass plug in' })).toBeInTheDocument();
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
+
+it('saves a manually changed title when focus leaves the field', () => {
+  const onSaveIdentity = vi.fn();
+  const view = render(
+    <InsightsPanel
+      result={{ title: 'Original title', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [], mentions: [], agentNotes: [], filesystem: [], snapshots: [] }}
+      onSaveIdentity={onSaveIdentity} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const title = within(view.container).getByRole('textbox', { name: 'Short Name' });
+  fireEvent.change(title, { target: { value: 'Updated title' } });
+  fireEvent.blur(title);
+
+  expect(onSaveIdentity).toHaveBeenCalledWith('Updated title');
+});
+
+it('commits a Mention edit when focus leaves the editor', async () => {
+  const onMentionCorrect = vi.fn();
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [],
+        mentions: [{ id: '2-3', tag: 'reclass plug in', time: '01:50', context: 'I use the reclass plug in here', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 3 }] }],
+        agentNotes: [], filesystem: [], snapshots: [],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={onMentionCorrect} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const query = within(view.container);
+  await user.click(query.getByRole('button', { name: 'reclass plug in' }));
+  const input = query.getByRole('textbox', { name: 'Correct reclass plug in' });
+  await user.clear(input);
+  await user.type(input, 'Reclass plugin');
+  fireEvent.blur(input);
+
+  expect(onMentionCorrect).toHaveBeenCalledWith([{ sourceWordStart: 2, sourceWordEnd: 3 }], 'Reclass plugin');
+});
+
+it('adds a Mention from a phrase in the transcript', async () => {
+  const onMentionAdd = vi.fn(() => true);
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [],
+        mentions: [], agentNotes: [], filesystem: [], snapshots: [],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionAdd={onMentionAdd} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const query = within(view.container);
+  await user.click(query.getByRole('button', { name: 'Add Mention' }));
+  await user.type(query.getByRole('textbox', { name: 'Words as transcribed' }), 'reclass plug in');
+  await user.type(query.getByRole('textbox', { name: 'Corrected mention' }), 'Reclass Plugin');
+  await user.click(query.getByRole('button', { name: 'Save new Mention' }));
+
+  expect(onMentionAdd).toHaveBeenCalledWith('reclass plug in', 'Reclass Plugin');
+  expect(query.queryByRole('textbox', { name: 'Words as transcribed' })).not.toBeInTheDocument();
+});
+
+it('accepts an output folder from a pasted path', async () => {
+  const onSelectDestinationPath = vi.fn(() => Promise.resolve(true));
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{ title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [], mentions: [], agentNotes: [], filesystem: [], snapshots: [] }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} onSelectDestinationPath={onSelectDestinationPath} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const query = within(view.container);
+  await user.type(query.getByRole('textbox', { name: 'Output path' }), '/Users/example/records');
+  await user.click(query.getByRole('button', { name: 'Use output path' }));
+
+  expect(onSelectDestinationPath).toHaveBeenCalledWith('/Users/example/records');
 });
 
 it('shows mention context immediately and marks the Snapshot anchor', async () => {
@@ -91,7 +203,7 @@ it('shows mention context immediately and marks the Snapshot anchor', async () =
         agentNotes: [], filesystem: [], snapshots: [{ filename: '02-slab.jpg', time: '02:10', subject: 'Slab creation', cuePhrase: 'I am going to rename it Slab now', anchorWord: 'Slab', speakerLabel: 'Developer', kind: 'detail', kept: true }],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 
@@ -118,7 +230,7 @@ it('cycles the bare snapshot viewer with arrow keys', async () => {
         ],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 
@@ -142,7 +254,7 @@ it('renders an unclipped 1.5× snapshot hover layer and selects its transcript c
         snapshots: [{ filename: '01-door.jpg', time: '00:10', subject: 'Door detail', cuePhrase: 'look at this door', anchorWord: 'door', speakerLabel: 'Developer', kind: 'detail', kept: true }],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={vi.fn()} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 
@@ -174,7 +286,7 @@ it('mutes a rejected Snapshot thumbnail but restores it in the hover preview', (
         snapshots: [{ filename: '01-rejected.jpg', time: '00:10', subject: 'Rejected frame', cuePhrase: 'look at the rejected frame', anchorWord: 'rejected', speakerLabel: 'Developer', kind: 'detail', kept: false, imageUrl: '/api/rejected.jpg' }],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={vi.fn()} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 
@@ -183,6 +295,29 @@ it('mutes a rejected Snapshot thumbnail but restores it in the hover preview', (
   fireEvent.pointerEnter(thumbnail.closest<HTMLElement>('[data-snapshot-card]')!);
   const hoverPreview = Array.from(document.querySelectorAll<HTMLElement>('[data-snapshot-hover-preview="true"]')).at(-1);
   expect(hoverPreview?.querySelector('img')).not.toHaveClass('opacity-35');
+});
+
+it('denies a Snapshot from the full viewer without closing it', async () => {
+  const onSnapshotKeep = vi.fn();
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [], mentions: [], agentNotes: [], filesystem: [],
+        snapshots: [{ filename: '01-door.jpg', time: '00:10', subject: 'Door detail', cuePhrase: 'look at this door', anchorWord: 'door', speakerLabel: 'Developer', kind: 'detail', kept: true, imageUrl: '/api/door.jpg' }],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={onSnapshotKeep}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  await user.click(view.getByRole('button', { name: '00:10 Door detail' }));
+  const denyButtons = screen.getAllByRole('button', { name: 'Remove 01-door.jpg' });
+  await user.click(denyButtons.at(-1)!);
+
+  expect(onSnapshotKeep).toHaveBeenCalledWith('01-door.jpg', false);
+  expect(screen.getAllByAltText('01-door.jpg')).toHaveLength(2);
 });
 
 it('applies one mention correction to every grouped source range', async () => {
@@ -197,7 +332,7 @@ it('applies one mention correction to every grouped source range', async () => {
         agentNotes: [], filesystem: [], snapshots: [],
       }}
       onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
-      onMentionCorrect={onMentionCorrect} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+      onMentionCorrect={onMentionCorrect} onMentionAdd={vi.fn(() => true)} onMentionSelect={vi.fn()} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
     />,
   );
 

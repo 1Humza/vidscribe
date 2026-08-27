@@ -1,3 +1,5 @@
+import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -68,17 +70,18 @@ def test_commit_publishes_one_verified_completed_session_folder(tmp_path: Path) 
     assert payload["stage"] == "completed"
     assert restored.json()["status"] == "completed"
     assert restored.json()["completed_folder_path"] == payload["completed_folder_path"]
-    completed_folder = destination / "2026-07-31-pipeline-test-sync"
+    completed_folder = destination / "[2026-07-31] Pipeline Test Sync"
     assert sorted(path.name for path in completed_folder.iterdir()) == [
-        "2026-07-31-pipeline-test-sync.24k.ogg",
-        "2026-07-31-pipeline-test-sync.md",
-        "2026-07-31-pipeline-test-sync.wav",
+        "[2026-07-31] Pipeline Test Sync.24k.ogg",
+        "[2026-07-31] Pipeline Test Sync.md",
+        "[2026-07-31] Pipeline Test Sync.wav",
+        "session.json",
     ]
-    assert "## Recall Brief" in (completed_folder / "2026-07-31-pipeline-test-sync.md").read_text()
-    assert (completed_folder / "2026-07-31-pipeline-test-sync.24k.ogg").is_file()
+    assert "## Recall Brief" in (completed_folder / "[2026-07-31] Pipeline Test Sync.md").read_text()
+    assert (completed_folder / "[2026-07-31] Pipeline Test Sync.24k.ogg").is_file()
     assert not source.exists()
     assert payload["source_path"] == str(
-        (completed_folder / "2026-07-31-pipeline-test-sync.wav").resolve()
+        (completed_folder / "[2026-07-31] Pipeline Test Sync.wav").resolve()
     )
     assert payload["attempts"][0]["raw_stream"] == ""
 
@@ -88,7 +91,7 @@ def test_commit_marks_existing_completed_folder_as_needing_attention(tmp_path: P
     make_recording(source)
     destination = tmp_path / "destination"
     destination.mkdir()
-    conflict = destination / "2026-07-31-pipeline-test-sync"
+    conflict = destination / "[2026-07-31] Pipeline Test Sync"
     conflict.mkdir()
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -130,12 +133,13 @@ def test_recommit_renames_completed_assets_after_a_session_date_correction(tmp_p
 
     assert corrected.status_code == 200
     assert recommitted.status_code == 200
-    completed_folder = destination / "2026-08-01-pipeline-test-sync"
-    assert not (destination / "2026-07-31-pipeline-test-sync").exists()
+    completed_folder = destination / "[2026-08-01] Pipeline Test Sync"
+    assert not (destination / "[2026-07-31] Pipeline Test Sync").exists()
     assert sorted(path.name for path in completed_folder.iterdir()) == [
-        "2026-08-01-pipeline-test-sync.24k.ogg",
-        "2026-08-01-pipeline-test-sync.md",
-        "2026-08-01-pipeline-test-sync.wav",
+        "[2026-08-01] Pipeline Test Sync.24k.ogg",
+        "[2026-08-01] Pipeline Test Sync.md",
+        "[2026-08-01] Pipeline Test Sync.wav",
+        "session.json",
     ]
     assert recommitted.json()["completed_folder_path"] == str(completed_folder.resolve())
 
@@ -164,7 +168,7 @@ def test_commit_restores_source_when_same_volume_publication_fails(tmp_path: Pat
 
     assert committed.status_code == 422
     assert source.is_file()
-    assert not (destination / "2026-07-31-pipeline-test-sync").exists()
+    assert not (destination / "[2026-07-31] Pipeline Test Sync").exists()
     assert not list(destination.glob(".*.staging-*"))
 
 
@@ -195,7 +199,7 @@ def test_commit_keeps_source_when_cross_volume_cleanup_fails(tmp_path: Path, mon
     assert committed.status_code == 422
     assert committed.json()["detail"] == "Could not safely finalize this Session"
     assert source.is_file()
-    assert (destination / "2026-07-31-pipeline-test-sync").is_dir()
+    assert (destination / "[2026-07-31] Pipeline Test Sync").is_dir()
 
 
 def test_commit_cleans_staging_when_session_record_write_fails(tmp_path: Path, monkeypatch) -> None:
@@ -352,7 +356,7 @@ def test_commit_never_replaces_a_destination_created_during_publication(
     assert committed.status_code == 200
     assert committed.json()["status"] == "needs_attention"
     assert source.is_file()
-    assert list((destination / "2026-07-31-pipeline-test-sync").iterdir()) == []
+    assert list((destination / "[2026-07-31] Pipeline Test Sync").iterdir()) == []
 
 
 def test_restart_recovers_a_folder_published_before_session_completion(tmp_path: Path) -> None:
@@ -385,8 +389,44 @@ def test_restart_recovers_a_folder_published_before_session_completion(tmp_path:
     assert recovered.status_code == 200, recovered.text
     assert recovered.json()["status"] == "completed"
     assert recovered.json()["completed_folder_path"] == str(
-        (destination / "2026-07-31-pipeline-test-sync").resolve()
+        (destination / "[2026-07-31] Pipeline Test Sync").resolve()
     )
+
+
+def test_restart_recovers_source_moved_back_after_partial_publication(tmp_path: Path) -> None:
+    source = tmp_path / "2026-07-31-recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        test_mode=True,
+        test_source_path=source,
+        test_destination_path=destination,
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        session_id, attempt_id = create_reviewed_session(client)
+        finalizing = app.state.sessions.claim_commit(
+            session_id, attempt_id, service_id=app.state.service_id, cross_volume=False
+        ).session
+        attempt = finalizing.attempts[0]
+        assert attempt.result is not None
+        published = SessionFinalizer().finalize(finalizing, attempt.result)
+        moved_back = source
+        moved_back.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(published.source_path, moved_back)
+
+    with TestClient(create_app(settings)) as restarted_client:
+        recovered = restarted_client.post(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/commit"
+        )
+
+    assert recovered.status_code == 200, recovered.text
+    completed_source = destination / "[2026-07-31] Pipeline Test Sync" / "[2026-07-31] Pipeline Test Sync.wav"
+    assert recovered.json()["status"] == "completed"
+    assert completed_source.is_file()
+    assert not source.exists()
 
 
 def test_live_duplicate_commit_reports_in_progress_without_changing_the_session(tmp_path: Path) -> None:
@@ -501,7 +541,7 @@ def test_completed_session_identity_edits_rename_its_saved_assets(tmp_path: Path
         second_commit = client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit")
         review_edit = client.patch(
             f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
-            json={"short_name": "Changed after completion"},
+            json={"short_name": "Changed: after completion"},
         )
         saved_edit = client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit")
 
@@ -511,10 +551,13 @@ def test_completed_session_identity_edits_rename_its_saved_assets(tmp_path: Path
     assert review_edit.status_code == 200
     assert saved_edit.status_code == 200
     completed_folder = Path(saved_edit.json()["completed_folder_path"])
-    record = completed_folder / "2026-07-31-changed-after-completion.md"
-    assert "Changed after completion" in record.read_text()
+    record = completed_folder / "[2026-07-31] Changed - after completion.md"
+    assert "Changed: after completion" in record.read_text()
     assert not Path(first_commit.json()["completed_folder_path"]).exists()
     assert Path(saved_edit.json()["source_path"]).is_file()
+    manifest = json.loads((completed_folder / "session.json").read_text(encoding="utf-8"))
+    assert manifest["committed_result"]["short_name"] == "Changed: after completion"
+    assert manifest["assets"]["record"]["path"] == "[2026-07-31] Changed - after completion.md"
 
 
 def test_completed_session_folder_selection_reopens_its_saved_record(tmp_path: Path) -> None:
@@ -538,3 +581,54 @@ def test_completed_session_folder_selection_reopens_its_saved_record(tmp_path: P
     assert reopened.status_code == 200
     assert reopened.json()["id"] == session_id
     assert reopened.json()["status"] == "completed"
+
+
+def test_completed_session_manifest_rehydrates_a_fresh_database(tmp_path: Path) -> None:
+    source = tmp_path / "2026-07-31-recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    original_settings = Settings(
+        data_dir=tmp_path / "original-data",
+        test_mode=True,
+        test_source_path=source,
+        test_destination_path=destination,
+    )
+
+    with TestClient(create_app(original_settings)) as client:
+        session_id, attempt_id = create_reviewed_session(client)
+        committed = client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit")
+
+    completed_folder = Path(committed.json()["completed_folder_path"])
+    manifest = json.loads((completed_folder / "session.json").read_text(encoding="utf-8"))
+    assert manifest["format"] == "speech-distiller.session"
+    assert manifest["schema_version"] == 1
+    assert manifest["session"]["source_path"] == "[2026-07-31] Pipeline Test Sync.wav"
+    assert not any(str(tmp_path) in value for value in manifest["session"].values() if isinstance(value, str))
+
+    moved_destination = tmp_path / "moved-destination"
+    moved_destination.mkdir()
+    moved_folder = moved_destination / completed_folder.name
+    completed_folder.rename(moved_folder)
+
+    fresh_settings = Settings(
+        data_dir=tmp_path / "fresh-data",
+        test_mode=True,
+        test_source_path=moved_folder,
+        test_destination_path=moved_destination,
+    )
+    with TestClient(create_app(fresh_settings)) as client:
+        selection = client.post("/api/pickers/source", json={}).json()
+        reopened = client.post(
+            "/api/sessions/open-completed",
+            json={"source_selection_id": selection["selection_id"]},
+        )
+        restored = client.get(f"/api/sessions/{session_id}")
+
+    assert reopened.status_code == 200
+    assert restored.status_code == 200
+    assert restored.json()["id"] == session_id
+    assert restored.json()["attempts"][0]["result"]["session_record_markdown"]
+    assert restored.json()["source_path"] == str(
+        (moved_folder / "[2026-07-31] Pipeline Test Sync.wav").resolve()
+    )

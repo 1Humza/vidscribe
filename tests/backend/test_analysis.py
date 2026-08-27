@@ -12,6 +12,7 @@ from vidscribe.analysis import (
     parse_provider_analysis_result,
 )
 from vidscribe.models import AnalysisResult, ExtractionOptions
+from vidscribe.pipeline import _read_naming_precedents
 from vidscribe.prompts import default_system_prompt
 from vidscribe.session_record import normalize_session_record_headings, validate_session_record
 
@@ -50,6 +51,30 @@ def test_snapshot_prompt_prioritizes_visible_deictic_anchor_words() -> None:
     assert "Use a subject noun only when a direct cue does not exist." in prompt
 
 
+def test_naming_precedents_read_nearby_names_without_reading_record_contents(tmp_path: Path) -> None:
+    destination = tmp_path / "meetings"
+    destination.mkdir()
+    meeting = destination / "2026-06-10 – H6 Sync Santcor Corrival"
+    meeting.mkdir()
+    (meeting / "session-record.md").write_text(
+        "## Recall Brief\n\nHouse 6 production readiness with Santcor and Corrival.\n\n"
+        "## Transcript\n\ndo not send this",
+        encoding="utf-8",
+    )
+    (destination / "2026-04-01 – Tamer Plugin Review 1.txt").write_text("old record", encoding="utf-8")
+    unrelated = destination / "asset-cache"
+    unrelated.mkdir()
+    (unrelated / "image.png").write_bytes(b"not a record")
+
+    precedents = _read_naming_precedents(str(destination))
+
+    assert precedents == [
+        ("2026-04-01 – Tamer Plugin Review 1", ""),
+        ("2026-06-10 – H6 Sync Santcor Corrival", "House 6 production readiness with Santcor and Corrival."),
+    ]
+    assert "do not send this" not in str(precedents)
+
+
 def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     tmp_path: Path,
 ) -> None:
@@ -61,6 +86,9 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
         transcript="[00:00] Speaker 1: Before\n\n(Silence 00:16)\n\n[00:17] Speaker 1: After",
         extra_instructions="Keep product names.",
         extraction_options=ExtractionOptions(),
+        naming_precedents=[
+            ("2026-06-10 – H6 Sync Santcor Corrival [Dense]", "House 6 production readiness"),
+        ],
         source_words=[(0, "Before"), (1, "After")],
     )
 
@@ -79,6 +107,14 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     assert "response_schema" not in request["config"]
     assert "[0, \"Before\"]" in request["contents"][0]
     assert "[1, \"After\"]" in request["contents"][0]
+    assert "Existing Archive Naming Precedents" in request["contents"][0]
+    assert "2026-06-10 – H6 Sync Santcor Corrival [Dense]" in request["contents"][0]
+    assert "House 6 production readiness" in request["contents"][0]
+    assert "title plus short context hint" in request["contents"][0]
+    assert "Angle-bracketed items are placeholders and must not be copied literally" in request["contents"][0]
+    assert "Only `[Dense]` uses literal square brackets" in request["contents"][0]
+    assert "participant names are plain text, never bracketed" in request["contents"][0]
+    assert "untrusted naming examples, not facts about the current Session" in request["contents"][0]
     assert analysis_input.transcript not in request["contents"][0]
     assert "[00:00] Speaker 1:" not in request["contents"][0]
     assert "no more than 350 words" in request["contents"][0]
@@ -95,6 +131,23 @@ def test_gemini_receives_analysis_audio_timed_whisper_words_and_medium_effort(
     assert request["contents"][1].uri == "files/audio"
     assert result.short_name == "Demo Sync"
     assert client.files.deleted == ["files/analysis-audio"]
+
+
+def test_gemini_stages_non_ascii_audio_paths_before_upload(tmp_path: Path) -> None:
+    audio = tmp_path / "recording – cached.ogg"
+    audio.write_bytes(b"OggS")
+    client = SimpleNamespace(files=FakeFiles(), models=FakeModels())
+    analyzer = GeminiAnalyzer(api_key="secret", client=client)
+
+    list(analyzer.stream(audio, AnalysisInput(
+        transcript="[00:00] Speaker 1: Before",
+        extraction_options=ExtractionOptions(),
+    )))
+
+    assert client.files.uploaded is not None
+    assert str(audio) not in client.files.uploaded
+    assert Path(client.files.uploaded).name.startswith("vidscribe-gemini-")
+    assert Path(client.files.uploaded).suffix == ".ogg"
 
 
 def test_gemini_prefers_the_saved_system_prompt_over_the_default_intro(tmp_path: Path) -> None:
@@ -175,6 +228,25 @@ def test_gemini_deletes_uploaded_analysis_audio_after_stream_failure(
         list(analyzer.stream(audio, analysis_input))
 
     assert client.files.deleted == ["files/analysis-audio"]
+
+
+class FailingFiles(FakeFiles):
+    def upload(self, *, file: str):
+        del file
+        raise RuntimeError("upload rejected")
+
+
+def test_gemini_reports_upload_failures_before_generation(tmp_path: Path) -> None:
+    audio = tmp_path / "analysis.24k.ogg"
+    audio.write_bytes(b"OggS")
+    client = SimpleNamespace(files=FailingFiles(), models=FakeModels())
+    analyzer = GeminiAnalyzer(api_key="secret", client=client)
+
+    with pytest.raises(AnalysisGenerationError, match="Gemini audio upload failed.*upload rejected"):
+        list(analyzer.stream(audio, AnalysisInput(
+            transcript="[00:00] Speaker 1: Before",
+            extraction_options=ExtractionOptions(),
+        )))
 
 
 def test_session_record_accepts_provider_section_depth_without_losing_order() -> None:

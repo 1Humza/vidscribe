@@ -20,9 +20,8 @@ function formatTimestamp(sessionDate: string, createdAt: string) {
 }
 
 function completedBasename(session: SessionViewDto, result: AnalysisResultDto) {
-  const asciiTitle = result.short_name.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
-  const slug = asciiTitle.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  return `${session.session_date}-${slug || 'session'}`;
+  const title = result.short_name.trim().replace(/\s+/g, ' ').replace(/\s*:\s*/g, ' - ');
+  return `[${session.session_date}] ${title || 'Session'}`;
 }
 
 function sourceExtension(path: string) {

@@ -94,11 +94,11 @@ export default function SystemPromptModal({ isOpen, value, lockedContract, isLoa
               <FileText size={15} className="text-orange-500" />
               <h3 className="text-[11px] font-bold uppercase tracking-wider">Format formula</h3>
             </div>
-            <p className="pt-2 text-xs leading-relaxed text-muted-canvas">File name</p>
-            <code className="block break-all font-mono text-xs text-orange-600 dark:text-orange-400">MM-DD-YYYY-short-name.extension</code>
+            <p className="pt-2 text-xs leading-relaxed text-muted-canvas">Finder folder</p>
+            <code className="block break-all font-mono text-xs text-orange-600 dark:text-orange-400">[YYYY-MM-DD] {'{short_name}'}</code>
             <p className="pt-3 text-xs leading-relaxed text-muted-canvas">Record header</p>
             <code className="block font-mono text-xs text-orange-600 dark:text-orange-400">📝 **{'{title}'}** · {'{MM-DD-YYYY}'}</code>
-            <p className="pt-3 text-xs leading-relaxed text-muted-canvas">Use a concise kebab-case <code>short-name</code> and keep the title aligned.</p>
+            <p className="pt-3 text-xs leading-relaxed text-muted-canvas">Use a concise human title. The server preserves it in Finder folder and asset names.</p>
           </div>
 
           <div ref={contractRef} className="pt-6">

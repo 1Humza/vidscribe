@@ -60,11 +60,24 @@ class DestinationSelectionRequest(BaseModel):
     destination_selection_id: str
 
 
+class SessionIntakeUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    extra_instructions: str = ""
+    speaker_hints: list[str] = Field(default_factory=list)
+    extraction_options: ExtractionOptions = Field(default_factory=ExtractionOptions)
+    attachment_selection_ids: list[str] | None = None
+
+
 class ExecuteSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: Literal["gemini-3-flash-preview", "gemini-2.5-flash"] | None = None
     effort: Literal["minimal", "low", "medium", "high"] | None = None
+    # Intake travels with Execute so a retry cannot run against an older saved draft.
+    extra_instructions: str | None = None
+    speaker_hints: list[str] | None = None
+    extraction_options: ExtractionOptions | None = None
 
     @model_validator(mode="after")
     def validate_model_effort(self) -> "ExecuteSessionRequest":
@@ -88,6 +101,12 @@ class ResolvedSessionIntake(AnalysisSelection):
 
 class PickerRequest(BaseModel):
     initial_path: str | None = None
+
+
+class PathSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
 
 
 class SystemPromptUpdate(BaseModel):
@@ -167,7 +186,7 @@ class AnalysisPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    short_name: str = Field(min_length=1)
+    short_name: str = Field(min_length=1, max_length=60)
     # Session Date is intake-owned; provider dates are ignored by the renderer.
     session_date: str = ""
     speaker_labels: list[str] = Field(min_length=1)
@@ -187,7 +206,7 @@ class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_record_markdown: str
-    short_name: str
+    short_name: str = Field(min_length=1, max_length=60)
     session_date: str
     speaker_labels: list[str] = Field(default_factory=list)
     consulted_attachment_filenames: list[str] = Field(default_factory=list)
@@ -238,7 +257,7 @@ class ReviewUpdate(BaseModel):
     session_record_markdown: str | None = None
     session_date: date | None = None
     session_time: time | None = None
-    short_name: str | None = None
+    short_name: str | None = Field(default=None, max_length=60)
     speaker_renames: dict[str, str] = Field(default_factory=dict)
     snapshot_keeps: dict[str, bool] = Field(default_factory=dict)
     phrase_corrections: list[PhraseCorrection] = Field(default_factory=list)

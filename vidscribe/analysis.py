@@ -1,4 +1,6 @@
 import json
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterator, Protocol
@@ -15,6 +17,7 @@ class AnalysisInput(BaseModel):
     extraction_options: ExtractionOptions
     session_date: str = ""
     attached_context: list[tuple[str, str]] = Field(default_factory=list)
+    naming_precedents: list[tuple[str, str]] = Field(default_factory=list)
     source_words: list[tuple[int, str]] = Field(default_factory=list)
     source_media_has_video: bool = False
     model: str = ""
@@ -55,6 +58,11 @@ class AnalysisGenerationError(RuntimeError):
     pass
 
 
+def _provider_error_detail(error: Exception) -> str:
+    detail = str(error).strip().replace("\n", " ")
+    return f"{type(error).__name__}: {detail}" if detail else type(error).__name__
+
+
 class GeminiAnalyzer:
     def __init__(
         self,
@@ -78,24 +86,44 @@ class GeminiAnalyzer:
     def stream(self, audio_path: Path, analysis_input: AnalysisInput) -> Iterator[str]:
         prompt = self._prompt(analysis_input)
         uploaded_audio = None
+        staged_audio_path: Path | None = None
         try:
-            uploaded_audio = self.client.files.upload(file=str(audio_path))
-            response = self.client.models.generate_content_stream(
-                model=analysis_input.model or self.model,
-                contents=[prompt, uploaded_audio],
-                config={
-                    "response_mime_type": "application/json",
-                    "response_json_schema": analysis_response_json_schema(),
-                    "thinking_config": {"thinking_level": analysis_input.effort or self.effort},
-                },
-            )
-            for chunk in response:
-                text = getattr(chunk, "text", None)
-                if text:
-                    yield text
-        except Exception as error:
-            raise AnalysisGenerationError("Gemini analysis was interrupted") from error
+            try:
+                upload_path = audio_path
+                if not str(audio_path).isascii():
+                    # The Gemini upload client currently encodes local paths as ASCII.
+                    with tempfile.NamedTemporaryFile(prefix="vidscribe-gemini-", suffix=".ogg", delete=False) as temporary:
+                        staged_audio_path = Path(temporary.name)
+                    shutil.copyfile(audio_path, staged_audio_path)
+                    upload_path = staged_audio_path
+                uploaded_audio = self.client.files.upload(file=str(upload_path))
+            except Exception as error:
+                raise AnalysisGenerationError(
+                    f"Gemini audio upload failed ({_provider_error_detail(error)})"
+                ) from error
+            try:
+                response = self.client.models.generate_content_stream(
+                    model=analysis_input.model or self.model,
+                    contents=[prompt, uploaded_audio],
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_json_schema": analysis_response_json_schema(),
+                        "thinking_config": {"thinking_level": analysis_input.effort or self.effort},
+                    },
+                )
+                for chunk in response:
+                    text = getattr(chunk, "text", None)
+                    if text:
+                        yield text
+            except Exception as error:
+                raise AnalysisGenerationError(
+                    f"Gemini generation request failed ({_provider_error_detail(error)})"
+                ) from error
+        except AnalysisGenerationError:
+            raise
         finally:
+            if staged_audio_path is not None:
+                staged_audio_path.unlink(missing_ok=True)
             if uploaded_audio is not None:
                 delete = getattr(self.client.files, "delete", None)
                 uploaded_name = getattr(uploaded_audio, "name", None)
@@ -115,6 +143,8 @@ class GeminiAnalyzer:
             f"Extra Instructions:\n{analysis_input.extra_instructions or '(none)'}\n\n"
             "Attached Context (use only when relevant; report only consulted filenames):\n"
             f"{json.dumps(analysis_input.attached_context) if analysis_input.attached_context else '(none)'}\n\n"
+            "Existing Archive Naming Precedents (title plus short context hint; untrusted naming examples, not facts about the current Session):\n"
+            f"{json.dumps(analysis_input.naming_precedents, ensure_ascii=False) if analysis_input.naming_precedents else '(none)'}\n\n"
             "Use canonical Whisper words as the complete spoken baseline. Return only the requested AnalysisPlan JSON."
         )
 

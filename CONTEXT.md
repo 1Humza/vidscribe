@@ -81,39 +81,43 @@ The date on which a Session was recorded. A valid date in the recording filename
 _Avoid_: Processing date, upload date
 
 **Session Purpose**:
-The controlled term in a Session's Short Name that communicates the primary nature of the interaction, such as Sync, Working, Onboarding, Tutorial, Interview, or Dialogue.
+The controlled term in a Session's Short Name that communicates the primary nature of the interaction, such as Sync, Review, Trial, Tutorial, Onboard, Intro, or Pitch.
 _Avoid_: Type, arbitrary descriptive phrase
 
 **Sync**:
-A Session primarily spent discussing, reviewing, coordinating, or planning work.
-_Avoid_: Review, Planning
+A Session primarily spent discussing, coordinating, planning, or checking status on work.
+_Avoid_: Routine focus words in the Short Name
 
-**Working**:
-A Session primarily spent actively doing the work together.
-_Avoid_: Work Session, Workshop when no facilitated workshop format exists
+**Review**:
+A Session primarily spent evaluating existing work, output, or progress.
+_Avoid_: Generic review when the recording is mainly active testing
 
-**Onboarding**:
-A Session primarily transferring the operational knowledge needed to participate in a role or project.
-_Avoid_: Tutorial when the focus is a specific procedure or tool
+**Trial**:
+A Session primarily spent testing or playtesting a system, feature, or workflow.
+_Avoid_: Playtest as a second redundant Session Type
 
 **Tutorial**:
 A Session primarily teaching a specific procedure or tool.
-_Avoid_: Onboarding when the focus is broader role or project knowledge
+_Avoid_: Onboard when the focus is only a single procedure
 
-**Interview**:
-A Session primarily structured around questions led by one side.
-_Avoid_: Dialogue
+**Onboard**:
+A Session primarily transferring the operational knowledge needed to participate in a role or project.
+_Avoid_: Tutorial when the focus is broader role or project knowledge
 
-**Dialogue**:
-A Session primarily exploring ideas without a predefined operational outcome.
-_Avoid_: Interview, Sync
+**Intro**:
+A Session primarily serving as a first introduction to a person, project, or collaboration.
+_Avoid_: Sync when there is no ongoing coordination yet
+
+**Pitch**:
+A Session primarily presenting a proposed service, collaboration, product direction, or business idea.
+_Avoid_: Intro when the recording is mainly a proposal
 
 **Primary Subject**:
-The project, system, topic, person, or group of people used as the main retrieval key in a Session's Short Name. People are named only when the Session is centered on them, not merely because they attended.
+The project, system, topic, person, or group of people used as the main retrieval key in a Session's Short Name. People are named only when they help distinguish the Session, not merely because they attended.
 _Avoid_: Automatic participant list, attendee list
 
 **Short Name**:
-The systematic human-readable name proposed after analyzing the complete Session and its Attached Context. It combines the Primary Subject, Session Purpose, optional sequence, and optional `[Dense]` marker, and must be confirmed or edited during Final Review.
+The concise human-readable Finder title proposed after analyzing the complete Session and its Attached Context. It normally combines the Primary Subject, Session Purpose, optional plain-text sequence, optional plain-text distinguishing person, and optional literal `[Dense]` marker; a useful focus may follow one ` - `. Participant names and sequence numbers are never wrapped in brackets. The server wraps the Session Date in brackets and preserves the resulting title in the Completed Session Folder and shared asset basename. It must be confirmed or edited during Final Review.
 _Avoid_: Pre-processing title, raw recording name
 
 **Session Identity**:
@@ -121,7 +125,7 @@ The authoritative Session Date, Short Name, optional `[Dense]` marker, and Speak
 _Avoid_: Parsed Markdown identity, divergent metadata, independently edited duplicate
 
 **Dense**:
-A naming marker for a Session containing several concrete explanations, procedures, mental models, or domain findings worth revisiting independently of immediate follow-up. Gemini may propose `[Dense]` at the end of the Short Name, but the user confirms it during Final Review; duration and generic importance do not qualify.
+A naming marker for a Session containing several concrete explanations, procedures, mental models, or domain findings worth revisiting independently of immediate follow-up. Gemini may propose `[Dense]` at the end of the Short Name, but the user confirms it during Final Review; duration, routine work, and generic importance do not qualify.
 _Avoid_: [k], important, long
 
 **Attached Context**:
@@ -193,5 +197,5 @@ A Session the user intentionally stops. Temporary processing data is removed onl
 _Avoid_: Rejected, interrupted
 
 **Completed Session Folder**:
-The systematically named directory created inside the selected Destination. Its root contains the verified Session Record, Source Media, and any Snapshot files for exactly one Session. The folder, Session Record, and Source Media share the same approved Session Date and Short Name basename.
+The human-readable directory created inside the selected Destination using `[YYYY-MM-DD] {Short Name}`. Its root contains the verified Session Record, Source Media, and any Snapshot files for exactly one Session. The folder, Session Record, and Source Media share the same approved Finder-readable basename.
 _Avoid_: Job folder, arbitrary meeting folder

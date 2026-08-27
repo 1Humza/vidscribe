@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   File,
   Folder,
+  FolderOpen,
   Image,
   Info,
-  Inbox,
   Lightbulb,
   Plus,
   Star,
@@ -31,12 +32,14 @@ interface InsightsPanelProps {
   onReviewEdit: () => void;
   onSnapshotKeep: (filename: string, kept: boolean) => void;
   onMentionCorrect: (ranges: Array<{ sourceWordStart: number; sourceWordEnd: number }>, replacement: string) => void;
+  onMentionAdd: (sourcePhrase: string, replacement: string) => boolean;
   onMentionSelect: (phrase: string | null, sourceWordIndex?: number, anchorWord?: string) => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'fading';
   onCommit: () => void;
   canCommit: boolean;
   destination?: SelectedDestination | null;
   onSelectDestination?: () => void;
+  onSelectDestinationPath?: (path: string) => Promise<boolean>;
   pickerBusy?: 'source' | 'destination' | null;
   isCommitPending: boolean;
   isReadOnly: boolean;
@@ -72,11 +75,17 @@ function isoDate(sessionDate: string): string {
   return match ? `${match[3]}-${match[1]}-${match[2]}` : sessionDate;
 }
 
-export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionSelect, saveStatus, onCommit, canCommit, destination = null, onSelectDestination = () => undefined, pickerBusy = null, isCommitPending, isReadOnly }: InsightsPanelProps) {
+export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDate, onRenameSpeaker, onReviewEdit, onSnapshotKeep, onMentionCorrect, onMentionAdd, onMentionSelect, saveStatus, onCommit, canCommit, destination = null, onSelectDestination = () => undefined, onSelectDestinationPath = async () => true, pickerBusy = null, isCommitPending, isReadOnly }: InsightsPanelProps) {
   const [activeFileContent, setActiveFileContent] = useState<{ name: string; content: string } | null>(null);
   const [activeSnapshotFilename, setActiveSnapshotFilename] = useState<string | null>(null);
   const [hoveredSnapshot, setHoveredSnapshot] = useState<{ filename: string; left: number; top: number; width: number; height: number } | null>(null);
   const [editingMention, setEditingMention] = useState<string | null>(null);
+  const [addingMention, setAddingMention] = useState(false);
+  const [newMentionPhrase, setNewMentionPhrase] = useState('');
+  const [newMentionReplacement, setNewMentionReplacement] = useState('');
+  const committedMentionRef = useRef<string | null>(null);
+  const [showDestinationPath, setShowDestinationPath] = useState(false);
+  const [destinationPath, setDestinationPath] = useState('');
   const [hoveredMention, setHoveredMention] = useState<string | null>(null);
   const [hoveredMentionPosition, setHoveredMentionPosition] = useState<{ left: number; top: number } | null>(null);
   const [fsExpanded, setFsExpanded] = useState<Record<string, boolean>>({
@@ -91,6 +100,36 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     ? snapshots.findIndex((snapshot) => snapshot.filename === activeSnapshotFilename)
     : -1;
   const hoveredSnapshotData = snapshots.find((snapshot) => snapshot.filename === hoveredSnapshot?.filename) ?? null;
+
+  const finishMentionEdit = (mention: DistillationResult['mentions'][number], value: string) => {
+    if (committedMentionRef.current === mention.id) return;
+    const replacement = value.trim();
+    committedMentionRef.current = mention.id;
+    if (replacement) onMentionCorrect(mention.sourceRanges, replacement);
+    setEditingMention(null);
+    clearMentionHover();
+    onMentionSelect(null);
+  };
+
+  const finishMentionAdd = (event: FormEvent) => {
+    event.preventDefault();
+    const sourcePhrase = newMentionPhrase.trim();
+    if (!sourcePhrase) return;
+    const replacement = newMentionReplacement.trim() || sourcePhrase;
+    if (!onMentionAdd(sourcePhrase, replacement)) return;
+    setAddingMention(false);
+    setNewMentionPhrase('');
+    setNewMentionReplacement('');
+    onMentionSelect(null);
+  };
+
+  const finishDestinationPath = async (event: FormEvent) => {
+    event.preventDefault();
+    const path = destinationPath.trim();
+    if (!path || !await onSelectDestinationPath(path)) return;
+    setDestinationPath('');
+    setShowDestinationPath(false);
+  };
 
   const openSnapshot = (filename: string) => {
     setHoveredSnapshot(null);
@@ -126,6 +165,11 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     const rect = element.getBoundingClientRect();
     setHoveredMention(mentionId);
     setHoveredMentionPosition({ left: rect.left, top: Math.max(8, rect.top - 6) });
+  };
+
+  const clearMentionHover = () => {
+    setHoveredMention(null);
+    setHoveredMentionPosition(null);
   };
 
   useEffect(() => {
@@ -263,9 +307,12 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       event.preventDefault();
-                      onSaveIdentity(event.currentTarget.value);
                       event.currentTarget.blur();
                     }
+                  }}
+                  onBlur={(event) => {
+                    const title = event.currentTarget.value.trim();
+                    if (title && title !== result.title) onSaveIdentity(title);
                   }}
                   aria-label="Short Name"
                   className="w-full bg-input-canvas border border-muted-canvas hover:border-active-canvas focus:border-active-canvas text-sm text-main-canvas font-sans px-2.5 py-1.5 rounded focus:outline-none transition-colors"
@@ -303,14 +350,54 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                   aria-label="Select Destination"
                   onClick={onSelectDestination}
                   disabled={pickerBusy !== null || isReadOnly}
-                  className="flex min-w-0 max-w-[58%] items-center gap-1.5 text-left text-orange-600 dark:text-orange-400 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  title={pickerBusy === 'destination' ? 'Opening output picker…' : 'Choose output folder in Finder'}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-muted-canvas text-orange-600 transition-colors hover:border-orange-500 hover:bg-orange-500/10 dark:text-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Inbox size={12} className="shrink-0" />
-                  <span className="min-w-0 truncate text-[10px] font-mono uppercase tracking-wider">
-                    {pickerBusy === 'destination' ? 'Opening output picker…' : destination ? destination.name : 'Choose output folder'}
-                  </span>
+                  <FolderOpen size={13} />
                 </button>
               </div>
+              {showDestinationPath || !destination ? (
+                <form onSubmit={finishDestinationPath} className="mb-2 flex items-center gap-1.5 rounded-lg bg-input-canvas border border-orange-500/40 p-1.5">
+                  <input
+                    autoFocus
+                    required
+                    aria-label="Output path"
+                    value={destinationPath}
+                    onChange={(event) => setDestinationPath(event.target.value)}
+                    placeholder="/path/to/output-folder"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-xs font-mono text-main-canvas placeholder-muted-canvas/60 focus:outline-none"
+                  />
+                  <button type="submit" aria-label="Use output path" disabled={pickerBusy !== null || isReadOnly} className="rounded-lg bg-orange-500 p-1.5 text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">
+                    <Check size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Cancel output path"
+                    onClick={() => {
+                      setShowDestinationPath(false);
+                      setDestinationPath('');
+                    }}
+                    className="rounded-lg border border-muted-canvas p-1.5 text-muted-canvas hover:text-rose-500"
+                  >
+                    <X size={13} />
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="Edit output path"
+                  onClick={() => {
+                    setDestinationPath(destination.path);
+                    setShowDestinationPath(true);
+                  }}
+                  disabled={isReadOnly}
+                  title="Click to edit the output folder path"
+                  className="mb-2 block w-full truncate rounded-lg border border-transparent px-2 py-1 text-left text-[10px] font-mono text-muted-canvas/70 underline decoration-dotted underline-offset-2 hover:border-muted-canvas hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {destination.path}
+                </button>
+              )}
               <div className="border border-muted-canvas p-2 rounded bg-input-canvas/50 min-h-9 max-h-[160px] overflow-y-auto">
                 {result.filesystem.length > 0 ? (
                   renderFileSystemTree(result.filesystem)
@@ -381,20 +468,16 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                     <input
                       key={mention.id}
                       autoFocus
+                      data-mention-editor="true"
                       aria-label={`Correct ${mention.tag}`}
                       defaultValue={mention.tag}
-                      onBlur={() => {
-                        setEditingMention(null);
-                        onMentionSelect(null);
-                      }}
+                      onBlur={(event) => finishMentionEdit(mention, event.currentTarget.value)}
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter' && event.currentTarget.value.trim()) {
-                          onMentionCorrect(mention.sourceRanges, event.currentTarget.value.trim());
-                          setEditingMention(null);
-                          onMentionSelect(null);
-                        }
+                        if (event.key === 'Enter') finishMentionEdit(mention, event.currentTarget.value);
                         if (event.key === 'Escape') {
+                          committedMentionRef.current = mention.id;
                           setEditingMention(null);
+                          clearMentionHover();
                           onMentionSelect(null);
                         }
                       }}
@@ -405,22 +488,21 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                       key={mention.id}
                       className="relative"
                       onMouseEnter={(event) => showMentionHover(mention.id, event.currentTarget)}
-                      onMouseLeave={() => {
-                        setHoveredMention(null);
-                        setHoveredMentionPosition(null);
-                      }}
+                      onMouseLeave={clearMentionHover}
                       onFocus={(event) => showMentionHover(mention.id, event.currentTarget)}
-                      onBlur={() => {
-                        setHoveredMention(null);
-                        setHoveredMentionPosition(null);
-                      }}
+                      onBlur={clearMentionHover}
                     >
                       <button
                         type="button"
                         disabled={isReadOnly}
                         onClick={() => {
-                          onMentionSelect(mention.tag);
+                          committedMentionRef.current = null;
+                          clearMentionHover();
                           setEditingMention(mention.id);
+                          // Enter edit mode before moving the transcript highlight so parent updates cannot swallow the editor.
+                          const sourceRange = mention.sourceRanges[0];
+                          // Anchor corrected tags to their canonical words, which may no longer be literal in the record.
+                          onMentionSelect(mention.tag, sourceRange?.sourceWordStart);
                         }}
                         className="inline-flex items-center px-2 py-0.5 rounded bg-input-canvas border border-muted-canvas text-xs text-main-canvas hover:border-orange-500 disabled:opacity-50"
                       >
@@ -430,15 +512,53 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                   )
                 ))}
 
-                <button
-                  type="button"
-                  disabled
-                  title={pendingActionTitle}
-                  className="inline-flex items-center space-x-0.5 px-2 py-0.5 rounded border border-dashed border-muted-canvas text-[11px] text-muted-canvas opacity-50 cursor-not-allowed"
-                >
-                  <Plus size={8} />
-                  <span>Add</span>
-                </button>
+                {addingMention ? (
+                  <form onSubmit={finishMentionAdd} className="basis-full flex flex-wrap items-center gap-1.5 rounded bg-input-canvas border border-orange-500/40 p-1.5">
+                    <input
+                      autoFocus
+                      required
+                      aria-label="Words as transcribed"
+                      value={newMentionPhrase}
+                      onChange={(event) => setNewMentionPhrase(event.target.value)}
+                      placeholder="Words as transcribed"
+                      className="min-w-0 flex-1 px-2 py-1 rounded bg-panel-canvas border border-muted-canvas text-xs text-main-canvas focus:outline-none focus:border-orange-500"
+                    />
+                    <input
+                      aria-label="Corrected mention"
+                      value={newMentionReplacement}
+                      onChange={(event) => setNewMentionReplacement(event.target.value)}
+                      placeholder="Corrected term (optional)"
+                      className="min-w-0 flex-1 px-2 py-1 rounded bg-panel-canvas border border-muted-canvas text-xs text-main-canvas focus:outline-none focus:border-orange-500"
+                    />
+                    <button type="submit" aria-label="Save new Mention" className="p-1 rounded bg-orange-500 text-white hover:bg-orange-600 cursor-pointer">
+                      <Check size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Cancel adding Mention"
+                      onClick={() => {
+                        setAddingMention(false);
+                        setNewMentionPhrase('');
+                        setNewMentionReplacement('');
+                      }}
+                      className="p-1 rounded border border-muted-canvas text-muted-canvas hover:text-rose-500 cursor-pointer"
+                    >
+                      <X size={11} />
+                    </button>
+                    <span className="basis-full px-1 text-[9px] font-mono text-muted-canvas uppercase">Enter the phrase exactly as it appears in the transcript.</span>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => setAddingMention(true)}
+                    aria-label="Add Mention"
+                    className="inline-flex items-center space-x-0.5 px-2 py-0.5 rounded border border-dashed border-orange-500/50 text-[11px] text-orange-500 hover:border-orange-500 hover:bg-orange-500/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Plus size={8} />
+                    <span>Add</span>
+                  </button>
+                )}
               </div>
             </div>
 

@@ -180,6 +180,8 @@ export default function DistillationPanel({
     const editor = markdownEditorRef.current;
     const targetLine = transcriptLineIndex(markdownText, highlightPhrase, highlightSourceWordIndex, highlightAnchorWord);
     if (!editor || targetLine === -1) return;
+    // Selecting a Mention also opens its editor; do not steal focus and blur that input.
+    if (document.activeElement instanceof HTMLInputElement && document.activeElement.dataset.mentionEditor === 'true') return;
     const lines = markdownText.split('\n');
     const turnStart = lines.slice(0, targetLine).reduce((offset, line) => offset + line.length + 1, 0);
     const turnEnd = turnStart + lines[targetLine].length;

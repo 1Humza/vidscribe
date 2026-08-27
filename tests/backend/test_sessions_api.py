@@ -177,6 +177,73 @@ def test_reselecting_renamed_source_restores_its_session(tmp_path: Path) -> None
     assert restored.json()["extra_instructions"] == "Keep this intake."
 
 
+def test_reselecting_moved_source_updates_completed_session_path(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    source.write_bytes(b"recording")
+    destination = tmp_path / "sessions"
+    destination.mkdir()
+    app_settings = settings(tmp_path)
+    app_settings.test_source_path = source
+    app_settings.test_destination_path = destination
+
+    with TestClient(create_app(app_settings)) as client:
+        source_selection = client.post("/api/pickers/source", json={}).json()
+        destination_selection = client.post("/api/pickers/destination", json={}).json()
+        created = client.post(
+            "/api/sessions",
+            json={
+                "source_selection_id": source_selection["selection_id"],
+                "destination_selection_id": destination_selection["selection_id"],
+            },
+        ).json()
+        client.app.state.sessions.update_session(created["id"], status="completed")
+
+    moved_source = destination / source.name
+    source.rename(moved_source)
+    app_settings.test_source_path = moved_source
+
+    with TestClient(create_app(app_settings)) as client:
+        source_selection = client.post("/api/pickers/source", json={}).json()
+        restored = client.post(
+            "/api/sessions/open-source",
+            json={"source_selection_id": source_selection["selection_id"]},
+        )
+
+    assert restored.status_code == 200
+    assert restored.json()["id"] == created["id"]
+    assert restored.json()["source_path"] == str(moved_source.resolve())
+
+
+def test_session_intake_update_persists_context_for_reexecution(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    source.write_bytes(b"recording")
+    destination = tmp_path / "sessions"
+    destination.mkdir()
+    app_settings = settings(tmp_path)
+    app_settings.test_source_path = source
+    app_settings.test_destination_path = destination
+
+    with TestClient(create_app(app_settings)) as client:
+        source_selection = client.post("/api/pickers/source", json={}).json()
+        created = client.post(
+            "/api/sessions",
+            json={"source_selection_id": source_selection["selection_id"]},
+        ).json()
+        updated = client.patch(
+            f"/api/sessions/{created['id']}/intake",
+            json={
+                "extra_instructions": "Preserve exact product names.",
+                "speaker_hints": ["Alex"],
+                "extraction_options": {"action_summary": False, "topics": True, "chapters": True, "highlights": False},
+            },
+        )
+
+    assert updated.status_code == 200
+    assert updated.json()["extra_instructions"] == "Preserve exact product names."
+    assert updated.json()["speaker_hints"] == ["Alex"]
+    assert updated.json()["extraction_options"]["topics"] is True
+
+
 def test_service_restart_recovers_processing_session_for_reexecution(tmp_path: Path) -> None:
     source = tmp_path / "recording.wav"
     make_recording(source)

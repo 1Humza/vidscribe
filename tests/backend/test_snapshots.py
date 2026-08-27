@@ -303,7 +303,7 @@ def test_video_session_materializes_an_anchored_snapshot_proposal(tmp_path: Path
             f"/api/sessions/{session_id}/attempts/{attempt_id}/snapshots/01-door-status.jpg"
         )
         committed = client.post(f"/api/sessions/{session_id}/attempts/{attempt_id}/commit")
-        completed_folder = destination / "2026-06-25-door-system-tutorial"
+        completed_folder = destination / "[2026-06-25] Door System Tutorial"
         assert (completed_folder / "01-door-status.jpg").is_file()
         removed = client.patch(
             f"/api/sessions/{session_id}/attempts/{attempt_id}/review",

@@ -56,6 +56,10 @@ export function pickSource(initialPath?: string): Promise<SourcePickerSelectionD
   return postJson('/api/pickers/source', initialPath ? { initial_path: initialPath } : {});
 }
 
+export function selectSourcePath(path: string): Promise<SourcePickerSelectionDto> {
+  return postJson('/api/pickers/source-path', { path });
+}
+
 export function pickCompletedSessionFolder(): Promise<SourcePickerSelectionDto> {
   return postJson('/api/pickers/completed-session', {});
 }
@@ -79,6 +83,10 @@ export async function openSourceSession(sourceSelectionId: string): Promise<Sess
 
 export function pickDestination(initialPath?: string): Promise<DestinationPickerSelectionDto> {
   return postJson('/api/pickers/destination', initialPath ? { initial_path: initialPath } : {});
+}
+
+export function selectDestinationPath(path: string): Promise<DestinationPickerSelectionDto> {
+  return postJson('/api/pickers/destination-path', { path });
 }
 
 export function pickAttachments(initialPath?: string): Promise<AttachmentPickerSelectionDto[]> {
@@ -115,6 +123,24 @@ export function updateSessionDestination(sessionId: string, destinationSelection
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ destination_selection_id: destinationSelectionId }),
+  });
+}
+
+export function updateSessionIntake(sessionId: string, input: {
+  extraInstructions: string;
+  speakerHints: string[];
+  extractionOptions: ExtractionOptionsDto;
+  attachmentSelectionIds?: string[];
+}): Promise<SessionViewDto> {
+  return requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/intake`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      extra_instructions: input.extraInstructions,
+      speaker_hints: input.speakerHints,
+      extraction_options: input.extractionOptions,
+      ...(input.attachmentSelectionIds ? { attachment_selection_ids: input.attachmentSelectionIds } : {}),
+    }),
   });
 }
 
@@ -195,13 +221,28 @@ function dispatchFrame(frame: string, onEvent: SessionEventHandler) {
 export async function executeSession(
   id: string,
   onEvent: SessionEventHandler,
-  selection?: { model: AnalysisModelDto; effort: AnalysisEffortDto },
+  selection?: {
+    model: AnalysisModelDto;
+    effort: AnalysisEffortDto;
+    extraInstructions?: string;
+    speakerHints?: string[];
+    extractionOptions?: ExtractionOptionsDto;
+  },
   signal?: AbortSignal,
 ) {
+  const body = selection
+    ? JSON.stringify({
+      model: selection.model,
+      effort: selection.effort,
+      ...(selection.extraInstructions !== undefined ? { extra_instructions: selection.extraInstructions } : {}),
+      ...(selection.speakerHints !== undefined ? { speaker_hints: selection.speakerHints } : {}),
+      ...(selection.extractionOptions !== undefined ? { extraction_options: selection.extractionOptions } : {}),
+    })
+    : undefined;
   const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(id)}/execute`), {
     method: 'POST',
     headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
-    body: selection ? JSON.stringify(selection) : undefined,
+    body,
     signal,
   });
   if (!response.ok) throw new Error(`Execution failed (${response.status}).`);

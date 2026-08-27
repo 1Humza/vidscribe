@@ -24,6 +24,7 @@ import type {
 interface IntakePanelProps {
   source: SelectedSource | null;
   onSelectSource: () => void;
+  onSelectSourcePath: (path: string) => Promise<boolean>;
   onClearSource: () => void;
   pickerBusy: 'source' | 'destination' | null;
   context: string;
@@ -86,6 +87,8 @@ function formatSourceDate(sourceDate: string | null | undefined): string {
 export default function IntakePanel(props: IntakePanelProps) {
   const [showAddSpeaker, setShowAddSpeaker] = useState(false);
   const [newSpeakerName, setNewSpeakerName] = useState('');
+  const [showSourcePath, setShowSourcePath] = useState(false);
+  const [sourcePath, setSourcePath] = useState('');
   const speakerList = props.speakers.split(',').map((name) => name.trim()).filter(Boolean);
 
   const toggleExtraction = (key: keyof ExtractionOptionsDto) => {
@@ -106,6 +109,20 @@ export default function IntakePanel(props: IntakePanelProps) {
     if (!name) return;
     props.setSpeakers([...speakerList, name].join(', '));
     setNewSpeakerName('');
+  };
+
+  const submitSourcePath = async (event: FormEvent) => {
+    event.preventDefault();
+    const path = sourcePath.trim();
+    if (!path) return;
+    if (!await props.onSelectSourcePath(path)) return;
+    setSourcePath('');
+    setShowSourcePath(false);
+  };
+
+  const openSourcePathEditor = () => {
+    setSourcePath(props.source?.path || '');
+    setShowSourcePath(true);
   };
 
   const removeSpeaker = (index: number) => {
@@ -150,9 +167,21 @@ export default function IntakePanel(props: IntakePanelProps) {
                     <div className="font-mono text-sm font-bold text-main-canvas truncate max-w-[280px] sm:max-w-md" title={props.source.name}>
                       {props.source.name}
                     </div>
-                    <div className="text-[10px] text-muted-canvas font-mono mt-0.5 truncate max-w-[260px] uppercase" title={props.source.path}>
+                    <div className="text-[10px] text-muted-canvas font-mono mt-0.5 truncate max-w-[260px] uppercase">
                       {props.source.mediaKind} • {formatFileSize(props.source.sizeBytes)} • {formatDuration(props.source.durationSeconds)} • {formatSourceDate(props.source.sourceDate)}
                     </div>
+                    {!showSourcePath && (
+                      <button
+                        type="button"
+                        aria-label="Edit source path"
+                        onClick={openSourcePathEditor}
+                        disabled={props.isProcessing}
+                        title="Click to edit the source path"
+                        className="mt-1 block max-w-[280px] truncate text-left text-[10px] font-mono normal-case text-muted-canvas/70 underline decoration-dotted underline-offset-2 hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {props.source.path}
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center space-x-1.5 flex-shrink-0">
@@ -199,6 +228,42 @@ export default function IntakePanel(props: IntakePanelProps) {
                 </div>
               </button>
             )}
+
+            {showSourcePath || !props.source ? (
+              <form
+                onSubmit={submitSourcePath}
+                className={`flex items-center gap-1.5 rounded-xl border p-1.5 ${
+                  props.source
+                    ? 'bg-input-canvas border-orange-500/40'
+                    : 'bg-orange-500/[0.02] border-dashed border-orange-500/35 hover:border-orange-500/60'
+                }`}
+              >
+                <input
+                  autoFocus={Boolean(!props.source || showSourcePath)}
+                  required
+                  aria-label="Source path"
+                  value={sourcePath}
+                  onChange={(event) => setSourcePath(event.target.value)}
+                  placeholder={props.source ? '/path/to/source-media.mp4' : 'Paste a source path to begin'}
+                  spellCheck={false}
+                  className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-xs font-mono text-main-canvas placeholder-muted-canvas/60 focus:outline-none"
+                />
+                <button type="submit" aria-label="Use source path" disabled={props.pickerBusy !== null || props.isProcessing} className="rounded-lg bg-orange-500 p-1.5 text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Check size={13} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Cancel source path"
+                  onClick={() => {
+                    setShowSourcePath(false);
+                    setSourcePath('');
+                  }}
+                  className="rounded-lg border border-muted-canvas p-1.5 text-muted-canvas hover:text-rose-500"
+                >
+                  <X size={13} />
+                </button>
+              </form>
+            ) : null}
           </div>
 
           <div className="space-y-3">

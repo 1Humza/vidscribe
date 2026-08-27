@@ -32,12 +32,19 @@ class CompletedSessionAssets:
 
 
 def session_basename(session: SessionView, result: AnalysisResult) -> str:
-    normalized_title = unicodedata.normalize("NFKD", result.short_name)
-    ascii_title = normalized_title.encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", ascii_title).strip("-").lower()
-    if not slug:
-        raise FinalizationError("Short Name cannot produce a safe Completed Session Folder name")
-    return f"{session.session_date.isoformat()}-{slug}"
+    title = re.sub(r"\s+", " ", unicodedata.normalize("NFC", result.short_name).strip())
+    # Keep provider titles readable while making the basename Finder-safe and consistent.
+    title = re.sub(r"\s*:\s*", " - ", title)
+    if not title or title in {".", ".."}:
+        raise FinalizationError("Short Name cannot be blank")
+    if "\x00" in title or "/" in title or title.startswith("."):
+        raise FinalizationError("Short Name contains an unsafe filesystem character")
+
+    # Finder is the primary archive browser, so preserve the human title instead of slugging it.
+    basename = f"[{session.session_date.isoformat()}] {title}"
+    if len(basename.encode("utf-8")) > 200:
+        raise FinalizationError("Completed Session name is too long for the filesystem")
+    return basename
 
 
 def _file_hash(path: Path) -> str:
@@ -51,6 +58,27 @@ def _file_hash(path: Path) -> str:
 def _verify_copy(source: Path, copied: Path) -> None:
     if not copied.is_file() or _file_hash(source) != _file_hash(copied):
         raise FinalizationError(f"Could not verify {source.name} in staging")
+
+
+def _restore_missing_completed_source(source: Path, completed_source: Path) -> None:
+    """Recover a source manually moved back while a publish was interrupted."""
+    if completed_source.is_file():
+        return
+    if not source.is_file() or source == completed_source:
+        raise FinalizationError("Completed Session media is unavailable")
+    try:
+        if source.stat().st_dev == completed_source.parent.stat().st_dev:
+            os.replace(source, completed_source)
+            return
+        temporary = completed_source.with_name(f".{completed_source.name}.recovery-{uuid4().hex}")
+        try:
+            shutil.copy2(source, temporary)
+            _verify_copy(source, temporary)
+            os.replace(temporary, completed_source)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except OSError as error:
+        raise FinalizationError("Completed Session media is unavailable") from error
 
 
 def _kept_snapshot_paths(result: AnalysisResult) -> list[tuple[SnapshotProposal, Path]]:
@@ -155,16 +183,16 @@ class SessionFinalizer:
         analysis_audio_path = completed_folder / f"{basename}.24k.ogg"
         record_path = completed_folder / f"{basename}.md"
         kept_snapshots = _kept_snapshot_paths(result)
+        original_source = Path(session.source_path)
         if (
             not completed_folder.is_dir()
-            or not source_path.is_file()
             or not analysis_audio_path.is_file()
             or not record_path.is_file()
             or record_path.read_text(encoding="utf-8") != result.session_record_markdown
             or any(not (completed_folder / snapshot.filename).is_file() for snapshot, _ in kept_snapshots)
         ):
             raise FinalizationError("Finalization requires attention before it can be recovered")
-        original_source = Path(session.source_path)
+        _restore_missing_completed_source(original_source, source_path)
         if cross_volume and original_source.exists():
             if _file_hash(original_source) != _file_hash(source_path):
                 raise FinalizationError(

@@ -287,6 +287,73 @@ def test_reloaded_mention_can_be_corrected_again(tmp_path: Path) -> None:
     assert result["mentions"][0]["replacement"] == "Previously"
 
 
+def test_phrase_correction_falls_back_to_canonical_text_after_markdown_edit(tmp_path: Path) -> None:
+    source = tmp_path / "2026-07-31-recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        test_mode=True,
+        test_source_path=source,
+        test_destination_path=destination,
+    )
+
+    with TestClient(
+        create_app(settings, transcriber=DeterministicTranscriber(), analyzer=TwoSpeakerAnalyzer())
+    ) as client:
+        session_id = create_completed_session(client)
+        attempt_id = client.get(f"/api/sessions/{session_id}").json()["attempts"][0]["id"]
+        first = client.patch(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
+            json={"phrase_corrections": [{"source_word_start": 0, "source_word_end": 0, "replacement": "Earlier"}]},
+        )
+        edited_markdown = first.json()["attempts"][0]["result"]["session_record_markdown"].replace("Earlier", "Before")
+        client.patch(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
+            json={"session_record_markdown": edited_markdown},
+        )
+        second = client.patch(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
+            json={"phrase_corrections": [{"source_word_start": 0, "source_word_end": 0, "replacement": "Previously"}]},
+        )
+
+    assert second.status_code == 200
+    assert "[00:00] Speaker 1: Previously" in second.json()["attempts"][0]["result"]["session_record_markdown"]
+
+
+def test_review_can_add_a_mention_for_a_transcribed_word(tmp_path: Path) -> None:
+    source = tmp_path / "2026-07-31-recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        test_mode=True,
+        test_source_path=source,
+        test_destination_path=destination,
+    )
+
+    with TestClient(
+        create_app(settings, transcriber=DeterministicTranscriber(), analyzer=TwoSpeakerAnalyzer())
+    ) as client:
+        session_id = create_completed_session(client)
+        attempt_id = client.get(f"/api/sessions/{session_id}").json()["attempts"][0]["id"]
+        response = client.patch(
+            f"/api/sessions/{session_id}/attempts/{attempt_id}/review",
+            json={"phrase_corrections": [{"source_word_start": 1, "source_word_end": 1, "replacement": "After"}]},
+        )
+
+    assert response.status_code == 200
+    mentions = response.json()["attempts"][0]["result"]["mentions"]
+    assert any(
+        mention["source_word_start"] == 1
+        and mention["source_word_end"] == 1
+        and mention["replacement"] == "After"
+        for mention in mentions
+    )
+
+
 def test_grouped_mention_edit_updates_every_occurrence_despite_punctuation(tmp_path: Path) -> None:
     source = tmp_path / "2026-07-31-recording.wav"
     make_recording(source)

@@ -72,6 +72,36 @@ def test_server_renders_transcript_and_chapters_from_canonical_word_times() -> N
     assert result.mentions[0].replacement == "corrected phrase."
 
 
+def test_server_normalizes_literal_escaped_newlines_in_action_summary() -> None:
+    payload = plan_payload()
+    payload["action_summary"] = r"[🧭] *Timing*\n\nFirst line\nSecond line"
+
+    result = render_analysis_plan(
+        AnalysisPlan.model_validate(payload),
+        words(),
+        ExtractionOptions(highlights=True),
+        source_media_has_video=False,
+    )
+
+    assert "[🧭] *Timing*\n\nFirst line\nSecond line" in result.session_record_markdown
+    assert r"\n" not in result.session_record_markdown
+
+
+def test_server_omits_chapter_boundaries_that_are_too_close_to_render() -> None:
+    payload = plan_payload()
+    payload["chapters"].insert(1, {"i": 1, "title": "Too soon"})
+
+    result = render_analysis_plan(
+        AnalysisPlan.model_validate(payload),
+        words(),
+        ExtractionOptions(highlights=True),
+        source_media_has_video=False,
+    )
+
+    assert "Too soon" not in result.session_record_markdown
+    assert "00:10 Correction" in result.session_record_markdown
+
+
 def test_server_renders_ten_second_silence_markers_on_single_lines() -> None:
     payload = plan_payload()
     payload.update({"turns": [{"s": 0, "e": 1, "p": 0}], "edits": [], "chapters": [], "highlights": [], "mentions": []})

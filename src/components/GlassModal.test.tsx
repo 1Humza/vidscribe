@@ -31,3 +31,13 @@ it('closes when Escape is pressed', () => {
 
   expect(onClose).toHaveBeenCalledOnce();
 });
+
+it('keeps controls clickable in a minimal modal', () => {
+  render(
+    <GlassModal isOpen onClose={vi.fn()} title="Preview" minimal>
+      <button type="button">Widget control</button>
+    </GlassModal>,
+  );
+
+  expect(Array.from(document.querySelectorAll('.relative.w-full.z-10')).at(-1)).toHaveClass('pointer-events-auto');
+});

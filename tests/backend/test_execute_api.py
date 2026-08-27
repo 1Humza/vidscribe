@@ -89,10 +89,17 @@ class SelectionCapturingAnalyzer(DeterministicAnalyzer):
     def __init__(self) -> None:
         super().__init__(delay_seconds=0)
         self.selections: list[tuple[str, str]] = []
+        self.instructions: list[str] = []
 
     def stream(self, audio_path: Path, analysis_input):
         self.selections.append((analysis_input.model, analysis_input.effort))
+        self.instructions.append(analysis_input.extra_instructions)
         yield from super().stream(audio_path, analysis_input)
+
+
+class PreStreamFailingAnalyzer(DeterministicAnalyzer):
+    def stream(self, audio_path: Path, analysis_input):
+        raise RuntimeError("pre-stream failure")
 
 
 def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path) -> None:
@@ -143,6 +150,73 @@ def test_execute_streams_real_media_pipeline_and_persists_review(tmp_path: Path)
     assert "corrected_transcript_turns" not in restored["attempts"][0]["result"]
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
     assert source.is_file()
+
+
+def test_execute_without_destination_reaches_analyzer(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    make_recording(source)
+    analyzer = SelectionCapturingAnalyzer()
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            test_mode=True,
+            test_source_path=source,
+        ),
+        transcriber=DeterministicTranscriber(),
+        analyzer=analyzer,
+    )
+
+    with TestClient(app) as client:
+        selected_source = client.post("/api/pickers/source", json={}).json()
+        created = client.post(
+            "/api/sessions",
+            json={
+                "source_selection_id": selected_source["selection_id"],
+                "session_date": "2026-07-31",
+            },
+        )
+        assert created.status_code == 201
+        session_id = created.json()["id"]
+        response = client.post(f"/api/sessions/{session_id}/execute")
+        restored = client.get(f"/api/sessions/{session_id}").json()
+
+    events = parse_sse(response.text)
+    assert response.status_code == 200
+    assert any(name == "complete" for name, _ in events)
+    assert restored["status"] == "review"
+    assert restored["attempts"][-1]["status"] == "completed"
+    assert analyzer.selections == [("gemini-3-flash-preview", "medium")]
+
+
+def test_pre_stream_failure_emits_analysis_error(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            test_mode=True,
+            test_source_path=source,
+            test_destination_path=destination,
+        ),
+        transcriber=DeterministicTranscriber(),
+        analyzer=PreStreamFailingAnalyzer(delay_seconds=0),
+    )
+
+    with TestClient(app) as client:
+        session_id = create_session(client, source, destination)
+        response = client.post(f"/api/sessions/{session_id}/execute")
+        restored = client.get(f"/api/sessions/{session_id}").json()
+
+    events = parse_sse(response.text)
+    assert response.status_code == 200
+    assert [name for name, _ in events][-2:] == ["analysis_error", "session"]
+    assert events[-2][1]["message"] == (
+        "Analysis generation stopped: pre-stream failure. No analysis output was received."
+    )
+    assert restored["status"] == "error"
+    assert restored["attempts"][0]["status"] == "error"
 
 
 def test_completed_session_can_be_reexecuted_and_republished(tmp_path: Path) -> None:
@@ -287,6 +361,43 @@ def test_execute_persists_selected_model_and_effort_and_uses_them_for_analysis(
     assert restored["attempts"][-1]["model"] == "gemini-2.5-flash"
     assert restored["attempts"][-1]["effort"] == "low"
     assert analyzer.selections == [("gemini-2.5-flash", "low")]
+
+
+def test_execute_persists_current_intake_and_uses_it_for_analysis(tmp_path: Path) -> None:
+    source = tmp_path / "recording.wav"
+    make_recording(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    analyzer = SelectionCapturingAnalyzer()
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            test_mode=True,
+            test_source_path=source,
+            test_destination_path=destination,
+        ),
+        transcriber=DeterministicTranscriber(),
+        analyzer=analyzer,
+    )
+
+    current_options = {"action_summary": False, "topics": True, "chapters": True, "highlights": False}
+    with TestClient(app) as client:
+        session_id = create_session(client, source, destination)
+        response = client.post(
+            f"/api/sessions/{session_id}/execute",
+            json={
+                "extra_instructions": "Use the newly edited instructions.",
+                "speaker_hints": ["Alex"],
+                "extraction_options": current_options,
+            },
+        )
+        restored = client.get(f"/api/sessions/{session_id}").json()
+
+    assert response.status_code == 200
+    assert restored["extra_instructions"] == "Use the newly edited instructions."
+    assert restored["speaker_hints"] == ["Alex"]
+    assert restored["extraction_options"] == current_options
+    assert analyzer.instructions == ["Use the newly edited instructions.\nSpeaker hints: Alex"]
 
 
 def test_execute_rejects_minimal_effort_for_gemini_2_5_flash(tmp_path: Path) -> None:

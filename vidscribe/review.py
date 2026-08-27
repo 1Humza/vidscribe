@@ -88,6 +88,9 @@ def apply_review_update(
         key = (" ".join(re.findall(r"[^\W_]+(?:['’][^\W_]+)?", current)).casefold(), correction.replacement.strip().casefold())
         if key not in processed:
             markdown, replacements = _propagate_phrase_correction(result, markdown, current, correction.replacement.strip())
+            if replacements == 0 and current != heard:
+                # Metadata can outlive a raw markdown draft; recover from the canonical transcript phrase.
+                markdown, replacements = _propagate_phrase_correction(result, markdown, heard, correction.replacement.strip())
             if replacements == 0:
                 raise ValueError("Phrase Correction text is no longer present in this Session")
             processed.add(key)

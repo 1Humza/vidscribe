@@ -79,6 +79,23 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('button', { name: 'Product Design: Mobile App Redesign sample preset (pending)' })).toBeDisabled();
   });
 
+  it('selects a source from a pasted absolute path', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'source-path-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video', size_bytes: 2048, duration_seconds: 125, source_date: '2026-07-31' }))
+      .mockImplementationOnce(noSourceSession);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(screen.getByRole('textbox', { name: 'Source path' }), session.source_path);
+    await user.click(screen.getByRole('button', { name: 'Use source path' }));
+
+    expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Execute' })).toBeEnabled();
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(JSON.stringify({ path: session.source_path }));
+  });
+
   it('uses opaque picker selections, previews raw streaming, then promotes a validated result', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video', size_bytes: 2048, duration_seconds: 125, source_date: '2026-07-31' }))
@@ -135,16 +152,20 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('low');
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
-    expect(screen.getByTitle(session.source_path)).toHaveTextContent('video • 2 KB • 02:05 • 2026-07-31');
+    expect(screen.getByRole('button', { name: 'Edit source path' })).toHaveTextContent(session.source_path);
     await user.click(screen.getByRole('button', { name: 'Execute' }));
 
     const review = await screen.findByRole('region', { name: 'Final Review' });
     expect(review).toHaveTextContent('(Silence 00:16)');
     expect(screen.getAllByRole('button', { name: 'Slab' })).toHaveLength(1);
-    expect(screen.getByText('2026-07-31-team-sync')).toBeInTheDocument();
-    expect(screen.getByText('2026-07-31-team-sync.md')).toBeInTheDocument();
-    expect(screen.getByText('2026-07-31-team-sync.24k.ogg')).toBeInTheDocument();
-    expect(screen.getByText('2026-07-31-team-sync.mp4')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'RAW' }));
+    await user.click(screen.getByRole('button', { name: 'Slab' }));
+    expect(screen.getByRole('textbox', { name: 'Correct Slab' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.getByText('[2026-07-31] Team Sync')).toBeInTheDocument();
+    expect(screen.getByText('[2026-07-31] Team Sync.md')).toBeInTheDocument();
+    expect(screen.getByText('[2026-07-31] Team Sync.24k.ogg')).toBeInTheDocument();
+    expect(screen.getByText('[2026-07-31] Team Sync.mp4')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Select Destination' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled());
@@ -161,13 +182,18 @@ describe('issue 2 session UI', () => {
       effort: 'low',
     });
     const executeRequest = fetchMock.mock.calls[3][1] as RequestInit;
-    expect(JSON.parse(executeRequest.body as string)).toEqual({ model: 'gemini-2.5-flash', effort: 'low' });
+    expect(JSON.parse(executeRequest.body as string)).toMatchObject({
+      model: 'gemini-2.5-flash',
+      effort: 'low',
+      extra_instructions: '',
+      speaker_hints: [],
+    });
 
     fireEvent.change(screen.getByLabelText('Session Date'), { target: { value: '2026-08-01T14:30' } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
     expect(JSON.parse((fetchMock.mock.calls[6][1] as RequestInit).body as string)).toEqual({ session_date: '2026-08-01', session_time: '14:30' });
     expect(screen.getByLabelText('Session Date')).toHaveValue('2026-08-01T14:30');
-    expect(screen.getByText('2026-08-01-team-sync')).toBeInTheDocument();
+    expect(screen.getByText('[2026-08-01] Team Sync')).toBeInTheDocument();
 
     const title = screen.getByLabelText('Short Name');
     await user.clear(title);
@@ -237,7 +263,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByText('Alex')).toBeInTheDocument();
     expect(screen.getByText('Sam')).toBeInTheDocument();
     expect(screen.getByLabelText('Context and Instructions')).toHaveValue('Keep the executive summary concise.');
-    expect(screen.getByTitle(session.source_path)).toHaveTextContent('video • 2 KB • 02:05 • 2026-07-31');
+    expect(screen.getByRole('button', { name: 'Edit source path' })).toHaveTextContent(session.source_path);
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-execute' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Remove Source' }));
@@ -271,12 +297,57 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('region', { name: 'Analysis Preview' })).toHaveTextContent('partial');
   });
 
+  it('restores a saved execution error after a browser refresh', async () => {
+    window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
+    const failure = 'Analysis generation stopped: Output folder was not selected.';
+    const failedSession = {
+      ...session,
+      destination_path: null,
+      status: 'error' as const,
+      stage: 'analyzing' as const,
+      progress: 65,
+      transcript: '[00:00] Speaker 1: Restored transcript',
+      attempts: [{
+        id: 'attempt-1', status: 'error' as const, model: 'gemini-3-flash-preview', effort: 'high',
+        raw_stream: '', result: null, error: failure,
+      }],
+    };
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => json(failedSession)));
+
+    render(<App />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+  });
+
+  it('copies the complete persistent execution error', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
+    const failure = 'Analysis generation stopped: Gemini audio upload failed (RuntimeError: upload rejected). No analysis output was received.';
+    const failedSession = {
+      ...session,
+      status: 'error' as const,
+      attempts: [{ id: 'attempt-1', status: 'error' as const, model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '', result: null, error: failure }],
+    };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => json(failedSession)));
+
+    render(<App />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+    await user.click(screen.getByRole('button', { name: 'Copy error' }));
+
+    expect(writeText).toHaveBeenCalledWith(failure);
+    expect(screen.getByRole('button', { name: 'Error copied' })).toBeInTheDocument();
+  });
+
   it('clears a failed attempt preview as soon as a re-execution starts', async () => {
     const failedSession = {
       ...session,
       status: 'error' as const,
       stage: 'analyzing' as const,
       progress: 70,
+      extra_instructions: 'Original instructions',
       transcript: '[00:00] Speaker 1: Retry this recording',
       attempts: [{
         id: 'attempt-1', status: 'error' as const, model: 'gemini-3-flash-preview', effort: 'medium',
@@ -303,7 +374,15 @@ describe('issue 2 session UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findByRole('region', { name: 'Analysis Preview' })).toHaveTextContent('stale preview');
+    const context = screen.getByRole('textbox', { name: 'Context and Instructions' });
+    await user.clear(context);
+    await user.type(context, 'Updated instructions');
     await user.click(screen.getByRole('button', { name: 'Execute' }));
+    await waitFor(() => expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toMatchObject({
+      extra_instructions: 'Updated instructions',
+      speaker_hints: [],
+    }));
+    expect(context).toHaveValue('Updated instructions');
     await waitFor(() => {
       const preview = screen.queryByRole('region', { name: 'Analysis Preview' });
       expect(preview?.textContent || '').not.toContain('stale preview');

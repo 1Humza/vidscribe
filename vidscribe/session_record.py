@@ -15,6 +15,7 @@ _SECTION_NAMES = (
 )
 
 _ACTION_SUMMARY_WORD_LIMIT = 350
+_MIN_CHAPTER_SPAN_SECONDS = 10.0
 
 
 def _clock(seconds: float) -> str:
@@ -37,6 +38,11 @@ def _word_text(tokens: list[str]) -> str:
         else:
             text += f" {stripped}"
     return text
+
+
+def _normalize_provider_text(value: str) -> str:
+    """Turn provider-escaped line breaks into real Markdown line breaks."""
+    return value.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
 
 
 def _require_index(index: int, words: list[WordTiming], field: str) -> None:
@@ -101,9 +107,9 @@ def _validate_plan(plan: AnalysisPlan, words: list[WordTiming], options: Extract
                 raise ValueError("Chapters must use ascending canonical Whisper word indexes")
             previous_index = chapter.anchor_word_index
         for current, following in zip(plan.chapters, plan.chapters[1:]):
-            if words[following.anchor_word_index].start - words[current.anchor_word_index].start < 10:
+            if words[following.anchor_word_index].start - words[current.anchor_word_index].start < _MIN_CHAPTER_SPAN_SECONDS:
                 raise ValueError("Chapters must span at least ten seconds")
-        if plan.chapters and words[-1].end - words[plan.chapters[-1].anchor_word_index].start < 10:
+        if plan.chapters and words[-1].end - words[plan.chapters[-1].anchor_word_index].start < _MIN_CHAPTER_SPAN_SECONDS:
             raise ValueError("Chapters must span at least ten seconds")
     elif plan.chapters:
         raise ValueError("Analysis Plan includes Chapters when Chapters are unselected")
@@ -121,6 +127,28 @@ def _validate_plan(plan: AnalysisPlan, words: list[WordTiming], options: Extract
         _speaker_label(cue.speaker_index, plan.speaker_labels, "Snapshot Cue")
         if not cue.source_word_start <= cue.anchor_word_index <= cue.source_word_end:
             raise ValueError("Snapshot Cue anchor must be within its source range")
+
+
+def _normalize_chapters(plan: AnalysisPlan, words: list[WordTiming], options: ExtractionOptions) -> AnalysisPlan:
+    """Drop provider chapter anchors that cannot produce a valid ten-second section."""
+    if not options.chapters or not plan.chapters or not words:
+        return plan
+    indexes = [chapter.anchor_word_index for chapter in plan.chapters]
+    if indexes[0] != 0 or any(index >= len(words) for index in indexes) or any(left >= right for left, right in zip(indexes, indexes[1:])):
+        return plan
+
+    usable = []
+    for chapter in plan.chapters:
+        if not usable or words[chapter.anchor_word_index].start - words[usable[-1].anchor_word_index].start >= _MIN_CHAPTER_SPAN_SECONDS:
+            usable.append(chapter)
+    while usable and words[-1].end - words[usable[-1].anchor_word_index].start < _MIN_CHAPTER_SPAN_SECONDS:
+        usable.pop()
+    if len(usable) < 3:
+        usable = []
+    if len(usable) == len(plan.chapters):
+        return plan
+    # Provider boundaries are suggestions; omit a too-close one instead of losing the whole analysis.
+    return plan.model_copy(update={"chapters": usable})
 
 
 def _corrected_tokens(words: list[WordTiming], plan: AnalysisPlan) -> list[str]:
@@ -160,10 +188,11 @@ def render_analysis_plan(
     source_media_has_video: bool,
 ) -> AnalysisResult:
     """Render a plan against canonical Whisper words; all time is server-owned."""
+    plan = _normalize_chapters(plan, words, options)
     _validate_plan(plan, words, options)
     tokens = _corrected_tokens(words, plan)
     header = f"📝 **{plan.short_name.strip()}** · {plan.session_date}"
-    parts = [header, "## Recall Brief", plan.recall_brief.strip()]
+    parts = [header, "## Recall Brief", _normalize_provider_text(plan.recall_brief).strip()]
     if options.highlights:
         highlight_lines = [
             f"- [{_clock(words[item.source_word_start].start)}] "
@@ -173,9 +202,11 @@ def render_analysis_plan(
         ]
         parts.extend(["## Highlights", "\n".join(highlight_lines) or "No Highlights qualify."])
     if options.action_summary:
-        parts.extend(["## Action Summary", f"{header}\n\n{plan.action_summary.strip() or 'No Action Summary qualifies.'}"])
+        action_summary = _normalize_provider_text(plan.action_summary).strip()
+        parts.extend(["## Action Summary", f"{header}\n\n{action_summary or 'No Action Summary qualifies.'}"])
     else:
-        parts.extend(["## Topics", plan.topics.strip() or "No Topics qualify."])
+        topics = _normalize_provider_text(plan.topics).strip()
+        parts.extend(["## Topics", topics or "No Topics qualify."])
     if options.chapters:
         chapter_lines = [
             f"{'00:00' if item.anchor_word_index == 0 else _clock(words[item.anchor_word_index].start)} {item.title.strip()}"

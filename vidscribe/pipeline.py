@@ -1,4 +1,5 @@
 import json
+import re
 from itertools import chain
 from pathlib import Path
 from typing import Iterator
@@ -30,6 +31,67 @@ def _read_attached_context(paths: list[str]) -> list[tuple[str, str]]:
             continue
         context.append((path.name, content))
     return context
+
+
+def _record_naming_hint(path: Path) -> str:
+    """Extract a tiny context hint without sending a prior transcript to Gemini."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")[:8_000]
+    except OSError:
+        return ""
+
+    if "## Recall Brief" in content:
+        hint = content.split("## Recall Brief", 1)[1].split("##", 1)[0]
+    elif "\nTranscript" in content:
+        hint = content.split("\nTranscript", 1)[0]
+    elif content.startswith("Context"):
+        hint = content
+    else:
+        return ""
+    return re.sub(r"\s+", " ", hint).strip()[:240]
+
+
+def _read_naming_precedents(destination_path: str | None, limit: int = 80) -> list[tuple[str, str]]:
+    """Read committed names plus small context hints, never prior meeting transcripts."""
+    if destination_path is None:
+        return []
+    destination = Path(destination_path)
+    try:
+        entries = list(destination.iterdir())
+    except OSError:
+        return []
+
+    precedents: dict[str, str] = {}
+    record_suffixes = {".md", ".txt"}
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        if entry.is_file() and entry.suffix.lower() in record_suffixes:
+            candidate = entry.stem.strip()
+            hint = _record_naming_hint(entry)
+        elif entry.is_dir():
+            try:
+                record_paths = [
+                    child
+                    for child in entry.iterdir()
+                    if child.is_file() and child.suffix.lower() in record_suffixes
+                ]
+            except OSError:
+                continue
+            if not record_paths:
+                continue
+            candidate = entry.name.strip()
+            record_path = next(
+                (path for path in record_paths if path.suffix.lower() == ".md"),
+                sorted(record_paths, key=lambda path: path.name.casefold())[0],
+            )
+            hint = _record_naming_hint(record_path)
+        else:
+            continue
+        if candidate and "\x00" not in candidate:
+            precedents.setdefault(candidate[:160], hint)
+
+    return sorted(precedents.items(), key=lambda item: item[0].casefold())[:limit]
 
 
 def _with_input_context(
@@ -91,10 +153,13 @@ class SessionPipeline:
         yield self._session_event(session)
         artifact_dir = self.workspace_path / session_id
         audio_path = artifact_dir / "analysis.24k.ogg"
+        raw_stream = ""
+        failure_stage = "preparing"
         try:
             if self._has_reusable_preparation(session):
                 prepared = Path(session.analysis_audio_path)
             else:
+                failure_stage = "transcribing"
                 prepared = self.media_preparer.prepare(Path(session.source_path), audio_path)
                 session = self.repository.update_session(
                     session_id,
@@ -115,6 +180,7 @@ class SessionPipeline:
             assert session.transcript is not None
 
             attempt_id = self.repository.create_attempt(session_id, session.model, session.effort)
+            failure_stage = "analyzing"
             analysis_input = AnalysisInput(
                 transcript=session.transcript,
                 extra_instructions="\n".join(
@@ -128,6 +194,7 @@ class SessionPipeline:
                 extraction_options=session.extraction_options,
                 session_date=session.session_date.isoformat(),
                 attached_context=_read_attached_context(session.attachment_paths),
+                naming_precedents=_read_naming_precedents(session.destination_path),
                 source_words=[
                     (index, str(word["word"]))
                     for index, word in enumerate(session.transcript_word_timings)
@@ -140,7 +207,6 @@ class SessionPipeline:
                 system_prompt=self.system_prompt_provider(),
             )
             stream = iter(self.analyzer.stream(prepared, analysis_input))
-            raw_stream = ""
             first_chunk = next(stream)
             session = self.repository.update_session(
                 session_id, stage="analyzing", progress=70
@@ -206,11 +272,12 @@ class SessionPipeline:
             yield self._event("complete", completed.model_dump(mode="json"))
         except Exception as error:
             detail = str(error).strip() or "an unexpected local error occurred"
-            message = f"Analysis generation stopped: {detail}. Partial output was preserved."
+            output_status = "Partial output was preserved." if raw_stream else "No analysis output was received."
+            message = f"Analysis generation stopped: {detail}. {output_status}"
             if "attempt_id" in locals():
                 self.repository.fail_attempt(attempt_id, message)
                 failed = self.repository.update_session(
-                    session_id, status="error", stage="analyzing"
+                    session_id, status="error", stage=failure_stage
                 )
                 yield self._event(
                     "analysis_error",
