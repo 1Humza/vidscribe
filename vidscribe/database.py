@@ -8,6 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 from vidscribe.models import AnalysisResult, ResolvedSessionIntake, SessionView
+from vidscribe.session_manifest import LoadedSessionManifest, load_session_manifest
 
 
 @dataclass(frozen=True)
@@ -197,14 +198,95 @@ class SessionRepository:
         return SessionView.model_validate(payload)
 
     def get_by_completed_folder(self, folder_path: Path) -> SessionView:
+        folder_path = folder_path.resolve()
+        manifest_path = folder_path / "session.json"
+        if manifest_path.is_file():
+            loaded = load_session_manifest(folder_path)
+            self._import_completed_manifest(loaded)
+            return loaded.session
         with self.connection() as connection:
             row = connection.execute(
                 "SELECT id FROM sessions WHERE completed_folder_path = ?",
-                (str(folder_path.resolve()),),
+                (str(folder_path),),
             ).fetchone()
         if row is None:
             raise KeyError(str(folder_path))
         return self.get(row["id"])
+
+    def _import_completed_manifest(self, loaded: LoadedSessionManifest) -> None:
+        """Rehydrate SQLite when a completed Session arrives from another environment."""
+        session = loaded.session
+        with self.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO sessions (
+                    id, status, stage, progress, source_path, source_fingerprint, destination_path,
+                    extra_instructions, speaker_hints, extraction_options, model, effort,
+                    analysis_audio_path, transcript, session_date, session_time, attachment_paths,
+                    transcript_word_timings, completed_folder_path, finalizing_attempt_id,
+                    finalizing_service_id, finalizing_cross_volume, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status = excluded.status, stage = excluded.stage, progress = excluded.progress,
+                    source_path = excluded.source_path, source_fingerprint = excluded.source_fingerprint,
+                    destination_path = excluded.destination_path,
+                    extra_instructions = excluded.extra_instructions,
+                    speaker_hints = excluded.speaker_hints,
+                    extraction_options = excluded.extraction_options,
+                    model = excluded.model, effort = excluded.effort,
+                    analysis_audio_path = excluded.analysis_audio_path,
+                    transcript = excluded.transcript, session_date = excluded.session_date,
+                    session_time = excluded.session_time, attachment_paths = excluded.attachment_paths,
+                    transcript_word_timings = excluded.transcript_word_timings,
+                    completed_folder_path = excluded.completed_folder_path,
+                    finalizing_attempt_id = NULL, finalizing_service_id = NULL,
+                    finalizing_cross_volume = NULL, created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    session.id,
+                    session.status,
+                    session.stage,
+                    session.progress,
+                    session.source_path,
+                    loaded.source_fingerprint,
+                    session.destination_path or "",
+                    session.extra_instructions,
+                    json.dumps(session.speaker_hints),
+                    session.extraction_options.model_dump_json(),
+                    session.model,
+                    session.effort,
+                    session.analysis_audio_path,
+                    session.transcript,
+                    session.session_date.isoformat(),
+                    session.session_time.isoformat(),
+                    json.dumps(session.attachment_paths),
+                    json.dumps(session.transcript_word_timings),
+                    session.completed_folder_path,
+                    session.created_at.isoformat(),
+                    session.updated_at.isoformat(),
+                ),
+            )
+            connection.execute("DELETE FROM analysis_attempts WHERE session_id = ?", (session.id,))
+            for attempt in session.attempts:
+                connection.execute(
+                    """
+                    INSERT INTO analysis_attempts (
+                        id, session_id, status, model, effort, raw_stream, result, error, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?)
+                    """,
+                    (
+                        attempt.id,
+                        session.id,
+                        attempt.status,
+                        attempt.model,
+                        attempt.effort,
+                        attempt.result.model_dump_json() if attempt.result is not None else None,
+                        attempt.error,
+                        session.created_at.isoformat(),
+                        session.updated_at.isoformat(),
+                    ),
+                )
 
     def get_by_source_fingerprint(self, fingerprint: str, source_path: Path) -> SessionView:
         now = datetime.now(UTC).isoformat()

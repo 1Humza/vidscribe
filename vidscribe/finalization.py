@@ -12,6 +12,7 @@ from typing import Callable
 from uuid import uuid4
 
 from vidscribe.models import AnalysisResult, SessionView
+from vidscribe.session_manifest import MANIFEST_FILENAME, write_session_manifest
 from vidscribe.snapshots import SnapshotError, SnapshotProposal, validate_snapshot_section
 
 
@@ -142,7 +143,11 @@ class SessionFinalizer:
         )
 
     def recover_published(
-        self, session: SessionView, result: AnalysisResult, *, cross_volume: bool
+        self,
+        session: SessionView,
+        result: AnalysisResult,
+        *,
+        cross_volume: bool,
     ) -> CompletedSessionAssets:
         basename = session_basename(session, result)
         completed_folder = Path(session.destination_path) / basename
@@ -172,7 +177,11 @@ class SessionFinalizer:
         return CompletedSessionAssets(completed_folder, source_path, analysis_audio_path)
 
     def overwrite_completed_record(
-        self, session: SessionView, result: AnalysisResult
+        self,
+        session: SessionView,
+        result: AnalysisResult,
+        *,
+        committed_attempt_id: str | None = None,
     ) -> CompletedSessionAssets:
         if session.completed_folder_path is None:
             raise FinalizationError("Completed Session Folder is unavailable")
@@ -188,6 +197,9 @@ class SessionFinalizer:
         kept_snapshots = _kept_snapshot_paths(result)
         staging_folder = completed_folder / f".{basename}.snapshot-sync-{uuid4().hex}"
         staged_record = staging_folder / record_path.name
+        target_basename = session_basename(session, result)
+        staged_manifest = staging_folder / MANIFEST_FILENAME
+        manifest_path = completed_folder / MANIFEST_FILENAME
         backup_folder = staging_folder / "backup"
         managed_snapshots = {
             snapshot.filename
@@ -198,6 +210,7 @@ class SessionFinalizer:
         managed_snapshots.update(snapshot.filename for snapshot in result.snapshots)
         published_snapshot_names: list[str] = []
         record_replaced = False
+        manifest_replaced = False
         try:
             staging_folder.mkdir()
             staged_record.write_text(result.session_record_markdown, encoding="utf-8")
@@ -208,6 +221,23 @@ class SessionFinalizer:
                 shutil.copy2(image_path, staged_snapshot)
                 _verify_copy(image_path, staged_snapshot)
 
+            write_session_manifest(
+                staged_manifest,
+                session,
+                result,
+                record_filename=f"{target_basename}.md",
+                source_filename=f"{target_basename}{Path(session.source_path).suffix}",
+                analysis_audio_filename=f"{target_basename}.24k.ogg",
+                record_file=staged_record,
+                source_file=source_path,
+                analysis_audio_file=analysis_audio_path,
+                snapshot_files={
+                    snapshot.filename: staging_folder / snapshot.filename
+                    for snapshot, _ in kept_snapshots
+                },
+                committed_attempt_id=committed_attempt_id,
+            )
+
             backup_folder.mkdir()
             for filename in managed_snapshots:
                 target = completed_folder / filename
@@ -215,17 +245,23 @@ class SessionFinalizer:
                     raise FinalizationError(f"Completed Snapshot {filename} is unavailable")
                 if target.is_file():
                     os.replace(target, backup_folder / filename)
+            if manifest_path.is_file():
+                os.replace(manifest_path, backup_folder / MANIFEST_FILENAME)
             os.replace(record_path, backup_folder / record_path.name)
             for snapshot, _ in kept_snapshots:
                 os.replace(staging_folder / snapshot.filename, completed_folder / snapshot.filename)
                 published_snapshot_names.append(snapshot.filename)
             os.replace(staged_record, record_path)
             record_replaced = True
+            os.replace(staged_manifest, manifest_path)
+            manifest_replaced = True
         except Exception as error:
             for filename in published_snapshot_names:
                 (completed_folder / filename).unlink(missing_ok=True)
             if record_replaced:
                 record_path.unlink(missing_ok=True)
+            if manifest_replaced:
+                manifest_path.unlink(missing_ok=True)
             if backup_folder.is_dir():
                 for backup in backup_folder.iterdir():
                     os.replace(backup, completed_folder / backup.name)
@@ -240,7 +276,13 @@ class SessionFinalizer:
             CompletedSessionAssets(completed_folder, source_path, analysis_audio_path),
         )
 
-    def finalize(self, session: SessionView, result: AnalysisResult) -> CompletedSessionAssets:
+    def finalize(
+        self,
+        session: SessionView,
+        result: AnalysisResult,
+        *,
+        committed_attempt_id: str | None = None,
+    ) -> CompletedSessionAssets:
         source = Path(session.source_path)
         analysis_audio = Path(session.analysis_audio_path or "")
         destination = Path(session.destination_path)
@@ -262,6 +304,7 @@ class SessionFinalizer:
         staged_source = staging_folder / f"{basename}{source.suffix}"
         staged_audio = staging_folder / f"{basename}.24k.ogg"
         staged_record = staging_folder / f"{basename}.md"
+        staged_manifest = staging_folder / MANIFEST_FILENAME
         moved_source = False
         published = False
         try:
@@ -285,6 +328,23 @@ class SessionFinalizer:
             if not staged_source.is_file() or _file_hash(staged_source) != source_hash:
                 raise FinalizationError("Could not verify Source Media in staging")
 
+            write_session_manifest(
+                staged_manifest,
+                session,
+                result,
+                record_filename=staged_record.name,
+                source_filename=staged_source.name,
+                analysis_audio_filename=staged_audio.name,
+                record_file=staged_record,
+                source_file=staged_source,
+                analysis_audio_file=staged_audio,
+                snapshot_files={
+                    snapshot.filename: staging_folder / snapshot.filename
+                    for snapshot, _ in kept_snapshots
+                },
+                committed_attempt_id=committed_attempt_id,
+            )
+
             _publish_no_replace(staging_folder, completed_folder)
             published = True
             completed_source = completed_folder / staged_source.name
@@ -294,6 +354,7 @@ class SessionFinalizer:
                 not completed_source.is_file()
                 or not completed_audio.is_file()
                 or not completed_record.is_file()
+                or not (completed_folder / MANIFEST_FILENAME).is_file()
                 or any(
                     not (completed_folder / snapshot.filename).is_file()
                     for snapshot, _ in kept_snapshots

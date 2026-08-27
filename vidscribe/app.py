@@ -12,6 +12,7 @@ from vidscribe.config import Settings
 from vidscribe.database import SessionRepository
 from vidscribe.fingerprints import source_fingerprint
 from vidscribe.finalization import DestinationConflict, FinalizationError, SessionFinalizer
+from vidscribe.session_manifest import SessionManifestError
 from vidscribe.media import FFmpegMediaPreparer, probe_duration
 from vidscribe.models import (
     CreateSessionRequest,
@@ -266,6 +267,8 @@ def create_app(
             raise HTTPException(status_code=422, detail="Select a Completed Session Folder")
         try:
             return repository.get_by_completed_folder(folder)
+        except SessionManifestError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Completed Session not found") from error
 
@@ -418,7 +421,9 @@ def create_app(
             attempt = next(item for item in session.attempts if item.id == attempt_id)
             assert attempt.result is not None
             try:
-                assets = app.state.finalizer.overwrite_completed_record(session, attempt.result)
+                assets = app.state.finalizer.overwrite_completed_record(
+                    session, attempt.result, committed_attempt_id=attempt_id
+                )
             except FinalizationError as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
             return complete(assets)
@@ -427,7 +432,9 @@ def create_app(
         if claim.resumes_finalization:
             try:
                 assets = app.state.finalizer.recover_published(
-                    session, attempt.result, cross_volume=bool(claim.cross_volume)
+                    session,
+                    attempt.result,
+                    cross_volume=bool(claim.cross_volume),
                 )
             except FinalizationError as error:
                 repository.update_session(
@@ -436,7 +443,9 @@ def create_app(
                 raise HTTPException(status_code=422, detail=str(error)) from error
             return complete(assets)
         try:
-            assets = app.state.finalizer.finalize(session, attempt.result)
+            assets = app.state.finalizer.finalize(
+                session, attempt.result, committed_attempt_id=attempt_id
+            )
         except DestinationConflict as error:
             return repository.update_session(
                 session_id, status="needs_attention", stage="review", progress=100
