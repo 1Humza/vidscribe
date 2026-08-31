@@ -81,6 +81,29 @@ it('edits a terminology Mention tag without dismissing it', async () => {
   expect(onMentionSelect).toHaveBeenLastCalledWith(null);
 });
 
+it('selects a terminology Mention while hovered and clears it on leave', async () => {
+  const onMentionSelect = vi.fn();
+  const user = userEvent.setup();
+
+  const view = render(
+    <InsightsPanel
+      result={{
+        title: 'Door System Tutorial', timestamp: 'Jun 25, 2026', markdown: '## Transcript', speakers: [],
+        mentions: [{ id: '2-3', tag: 'reclass plug in', time: '01:50', context: 'I use the reclass plug in here', speakerLabel: 'Developer', sourceRanges: [{ sourceWordStart: 2, sourceWordEnd: 3 }] }],
+        agentNotes: [], filesystem: [], snapshots: [],
+      }}
+      onSaveIdentity={vi.fn()} onSaveSessionDate={vi.fn()} onRenameSpeaker={vi.fn()} onReviewEdit={vi.fn()} onSnapshotKeep={vi.fn()}
+      onMentionCorrect={vi.fn()} onMentionAdd={vi.fn(() => true)} onMentionSelect={onMentionSelect} saveStatus="idle" onCommit={vi.fn()} canCommit isCommitPending={false} isReadOnly={false}
+    />,
+  );
+
+  const mention = within(view.container).getByRole('button', { name: 'reclass plug in' });
+  await user.hover(mention);
+  expect(onMentionSelect).toHaveBeenLastCalledWith('reclass plug in', 2);
+  await user.unhover(mention);
+  expect(onMentionSelect).toHaveBeenLastCalledWith(null);
+});
+
 it('hides a Mention tooltip while its tag is being edited', async () => {
   const user = userEvent.setup();
   const view = render(
@@ -186,8 +209,9 @@ it('accepts an output folder from a pasted path', async () => {
   );
 
   const query = within(view.container);
-  await user.type(query.getByRole('textbox', { name: 'Output path' }), '/Users/example/records');
-  await user.click(query.getByRole('button', { name: 'Use output path' }));
+  const outputPath = query.getByRole('textbox', { name: 'Output path' });
+  await user.type(outputPath, '/Users/example/records');
+  await user.keyboard('{Enter}');
 
   expect(onSelectDestinationPath).toHaveBeenCalledWith('/Users/example/records');
 });

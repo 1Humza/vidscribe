@@ -79,6 +79,99 @@ describe('issue 2 session UI', () => {
     expect(screen.getByRole('button', { name: 'Product Design: Mobile App Redesign sample preset (pending)' })).toBeDisabled();
   });
 
+  it('restores the last destination path and reissues its picker capability for a new session', async () => {
+    const destinationPath = '/archive/remembered';
+    window.localStorage.setItem('vidscribe.lastDestinationPath', destinationPath);
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(noSourceSession)
+      .mockImplementationOnce(() => json({ selection_id: 'fresh-destination-token', path: destinationPath, name: 'remembered' }))
+      .mockImplementationOnce(() => json({ ...session, destination_path: destinationPath }, 201))
+      .mockImplementationOnce(() => sse([`event: complete\ndata: ${JSON.stringify({ ...session, destination_path: destinationPath })}\n\n`]))
+      .mockImplementation(() => json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Select Source' }));
+    await user.click(screen.getByRole('button', { name: 'Execute' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({ path: destinationPath });
+    expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toMatchObject({
+      source_selection_id: 'source-token',
+      destination_selection_id: 'fresh-destination-token',
+    });
+    expect(window.localStorage.getItem('vidscribe.lastDestinationPath')).toBe(destinationPath);
+  });
+
+  it('does not treat a remembered path as the destination of an existing session', async () => {
+    window.localStorage.setItem('vidscribe.lastDestinationPath', '/archive/remembered');
+    window.localStorage.setItem('vidscribe.activeSessionId', 'session-1');
+    const reviewSession = {
+      ...session,
+      destination_path: null,
+      status: 'review' as const,
+      stage: 'review' as const,
+      progress: 100,
+      attempts: [{
+        id: 'attempt-1', status: 'completed' as const, model: 'gemini-3-flash-preview', effort: 'medium', raw_stream: '', error: null,
+        result: { session_record_markdown: '# Review', short_name: 'Review', session_date: '07-31-2026', speaker_labels: [] },
+      }],
+    };
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => json(reviewSession)));
+
+    render(<App />);
+
+    await screen.findByRole('region', { name: 'Final Review' });
+    expect(screen.queryByText('/archive/remembered')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+  });
+
+  it('copies settings from a picked session without requiring a current source', async () => {
+    const copied = {
+      ...session,
+      extra_instructions: 'Use the launch brief.',
+      speaker_hints: ['Ada', 'Lin'],
+      extraction_options: { action_summary: false, topics: true, chapters: false, highlights: true },
+      model: 'gemini-2.5-flash' as const,
+      effort: 'high' as const,
+    };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'copy-source-token', path: copied.source_path, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(() => json(copied))
+      .mockImplementation(() => json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: 'Copy settings' }));
+    await user.click(screen.getByRole('button', { name: 'Select copy settings path' }));
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Context' })).toHaveValue('Use the launch brief.'));
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+    expect(screen.getByText('Lin')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toHaveValue('gemini-2.5-flash');
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('high');
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({});
+  });
+
+  it('starts the native source picker at the remembered source path', async () => {
+    const sourcePath = '/recordings/remembered/team-sync.mp4';
+    window.localStorage.setItem('vidscribe.lastSourcePath', sourcePath);
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ selection_id: 'source-token', path: sourcePath, name: 'team-sync.mp4', media_kind: 'video' }))
+      .mockImplementationOnce(noSourceSession);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: 'Select Source' }));
+
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ initial_path: sourcePath });
+  });
+
   it('selects a source from a pasted absolute path', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => json({ selection_id: 'source-path-token', path: session.source_path, name: 'team-sync.mp4', media_kind: 'video', size_bytes: 2048, duration_seconds: 125, source_date: '2026-07-31' }))
@@ -88,12 +181,68 @@ describe('issue 2 session UI', () => {
 
     render(<App />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Source path' }), session.source_path);
-    await user.click(screen.getByRole('button', { name: 'Use source path' }));
+    const sourcePath = screen.getByRole('textbox', { name: 'Source path' });
+    await user.type(sourcePath, session.source_path);
+    await user.keyboard('{Enter}');
 
     expect(await screen.findAllByText('team-sync.mp4')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Execute' })).toBeEnabled();
     expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(JSON.stringify({ path: session.source_path }));
+  });
+
+  it('refreshes an audio source capability after the service restarts', async () => {
+    const audioPath = '/recordings/team-sync.wav';
+    const refreshedSelection = {
+      selection_id: 'refreshed-audio-token',
+      path: audioPath,
+      name: 'team-sync.wav',
+      media_kind: 'audio' as const,
+      size_bytes: 4096,
+      duration_seconds: 125,
+      source_date: '2026-07-31',
+    };
+    const staleAttachment = {
+      selection_id: 'stale-attachment-token',
+      path: '/recordings/context.md',
+      name: 'context.md',
+    };
+    const refreshedAttachment = {
+      selection_id: 'refreshed-attachment-token',
+      path: staleAttachment.path,
+      name: staleAttachment.name,
+    };
+    const audioSession = { ...session, source_path: audioPath, destination_path: null };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => json({ ...refreshedSelection, selection_id: 'stale-audio-token' }))
+      .mockImplementationOnce(noSourceSession)
+      .mockImplementationOnce(() => json([staleAttachment]))
+      .mockImplementationOnce(() => json({ detail: 'Picker selection is invalid or expired' }, 422))
+      .mockImplementationOnce(() => json(refreshedSelection))
+      .mockImplementationOnce(() => json(refreshedAttachment))
+      .mockImplementationOnce(() => json(audioSession, 201))
+      .mockImplementationOnce(() => sse([`event: complete\ndata: ${JSON.stringify(audioSession)}\n\n`]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Select Source' }));
+    expect(await screen.findByTitle('team-sync.wav')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Attach reference files' }));
+    expect(await screen.findByText('context.md')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Execute' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8));
+
+    expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toMatchObject({
+      source_selection_id: 'stale-audio-token',
+    });
+    expect(JSON.parse((fetchMock.mock.calls[6][1] as RequestInit).body as string)).toMatchObject({
+      source_selection_id: 'refreshed-audio-token',
+      attachment_selection_ids: ['refreshed-attachment-token'],
+    });
+    expect(JSON.stringify((fetchMock.mock.calls[3][1] as RequestInit).body)).not.toContain(audioPath);
+    expect(JSON.stringify((fetchMock.mock.calls[6][1] as RequestInit).body)).not.toContain(audioPath);
+    expect(JSON.stringify((fetchMock.mock.calls[6][1] as RequestInit).body)).not.toContain(staleAttachment.path);
   });
 
   it('uses opaque picker selections, previews raw streaming, then promotes a validated result', async () => {
@@ -167,7 +316,7 @@ describe('issue 2 session UI', () => {
     expect(screen.getByText('[2026-07-31] Team Sync.24k.ogg')).toBeInTheDocument();
     expect(screen.getByText('[2026-07-31] Team Sync.mp4')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Select Destination' }));
+    await user.click(screen.getByRole('button', { name: 'Select output path' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled());
     expect(screen.getByRole('checkbox', { name: 'Trash Source (pending)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview Snapshots' })).toBeInTheDocument();
@@ -262,7 +411,7 @@ describe('issue 2 session UI', () => {
     expect(await screen.findByRole('region', { name: 'Final Review' })).toHaveTextContent('Restored review');
     expect(screen.getByText('Alex')).toBeInTheDocument();
     expect(screen.getByText('Sam')).toBeInTheDocument();
-    expect(screen.getByLabelText('Context and Instructions')).toHaveValue('Keep the executive summary concise.');
+    expect(screen.getByLabelText('Context')).toHaveValue('Keep the executive summary concise.');
     expect(screen.getByRole('button', { name: 'Edit source path' })).toHaveTextContent(session.source_path);
     expect(screen.queryByRole('region', { name: 'Analysis Preview' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-execute' })).toBeEnabled();
@@ -374,7 +523,7 @@ describe('issue 2 session UI', () => {
 
     await user.click(screen.getByRole('button', { name: 'Select Source' }));
     expect(await screen.findByRole('region', { name: 'Analysis Preview' })).toHaveTextContent('stale preview');
-    const context = screen.getByRole('textbox', { name: 'Context and Instructions' });
+    const context = screen.getByRole('textbox', { name: 'Context' });
     await user.clear(context);
     await user.type(context, 'Updated instructions');
     await user.click(screen.getByRole('button', { name: 'Execute' }));

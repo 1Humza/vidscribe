@@ -194,9 +194,15 @@ def load_session_manifest(folder: Path) -> LoadedSessionManifest:
         source_path = _resolve_asset(folder, source_asset["path"], "Source Media")
         audio_path = _resolve_asset(folder, audio_asset["path"], "Analysis Audio")
         record_path = _resolve_asset(folder, dict(assets["record"])["path"], "Session Record")
-        if not source_path.is_file() or not audio_path.is_file() or not record_path.is_file():
+        # The source recording is useful for reprocessing, but not required to reopen
+        # the completed record and its saved analysis.
+        if not audio_path.is_file() or not record_path.is_file():
             raise SessionManifestError("Completed Session manifest references missing assets")
-        if source_asset.get("sha256") and source_asset["sha256"] != _file_hash(source_path):
+        if (
+            source_path.is_file()
+            and source_asset.get("sha256")
+            and source_asset["sha256"] != _file_hash(source_path)
+        ):
             raise SessionManifestError("Source Media does not match the Session manifest")
         if audio_asset.get("sha256") and audio_asset["sha256"] != _file_hash(audio_path):
             raise SessionManifestError("Analysis Audio does not match the Session manifest")
@@ -225,4 +231,7 @@ def load_session_manifest(folder: Path) -> LoadedSessionManifest:
         if isinstance(error, SessionManifestError):
             raise
         raise SessionManifestError("Completed Session manifest is malformed") from error
-    return LoadedSessionManifest(session, str(source_asset.get("sha256") or _file_hash(source_path)))
+    source_fingerprint = str(source_asset.get("sha256") or "")
+    if source_path.is_file() and not source_fingerprint:
+        source_fingerprint = _file_hash(source_path)
+    return LoadedSessionManifest(session, source_fingerprint)

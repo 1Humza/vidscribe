@@ -171,6 +171,8 @@ export interface SelectedDestination {
   name: string;
 }
 
+export type PickerBusy = 'source' | 'destination' | 'copy-settings' | null;
+
 export interface Speaker {
   id: string;
   initials: string;

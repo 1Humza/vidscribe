@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
-import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, selectDestinationPath as resolveDestinationPath, selectSourcePath as resolveSourcePath, updateReview, updateSessionDestination, updateSystemPrompt, type SessionEvent } from './api';
+import { commitSession, createSession, executeSession, getSession, getSystemPrompt, openCompletedSession, openSourceSession, pickAttachments, pickDestination, pickSource, selectAttachmentPath as resolveAttachmentPath, selectDestinationPath as resolveDestinationPath, selectSourcePath as resolveSourcePath, updateReview, updateSessionDestination, updateSystemPrompt, type SessionEvent } from './api';
 import IntakePanel from './components/IntakePanel';
 import DistillationPanel from './components/DistillationPanel';
 import InsightsPanel from './components/InsightsPanel';
@@ -13,11 +13,14 @@ import type {
   SelectedAttachment,
   SelectedSource,
   SessionViewDto,
+  PickerBusy,
 } from './types';
 import { fileName, matchingMentionRanges, toReview } from './sessionReview';
 
 
 const ACTIVE_SESSION_KEY = 'vidscribe.activeSessionId';
+const LAST_DESTINATION_PATH_KEY = 'vidscribe.lastDestinationPath';
+const LAST_SOURCE_PATH_KEY = 'vidscribe.lastSourcePath';
 const AUDIO_EXTENSIONS = new Set(['aac', 'aiff', 'flac', 'm4a', 'mp3', 'ogg', 'wav']);
 
 const mediaKindForPath = (path: string): 'audio' | 'video' => {
@@ -53,7 +56,10 @@ export default function App() {
       : 'light'
   ));
   const [source, setSource] = useState<SelectedSource | null>(null);
-  const [destination, setDestination] = useState<SelectedDestination | null>(null);
+  const [destination, setDestination] = useState<SelectedDestination | null>(() => {
+    const path = typeof window !== 'undefined' ? window.localStorage.getItem(LAST_DESTINATION_PATH_KEY) : null;
+    return path ? { path, name: fileName(path) } : null;
+  });
   const [context, setContext] = useState('');
   const [attachments, setAttachments] = useState<SelectedAttachment[]>([]);
   const [speakers, setSpeakers] = useState('');
@@ -72,7 +78,7 @@ export default function App() {
   const [processTime, setProcessTime] = useState('00:00');
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [errorCopied, setErrorCopied] = useState(false);
-  const [pickerBusy, setPickerBusy] = useState<'source' | 'destination' | null>(null);
+  const [pickerBusy, setPickerBusy] = useState<PickerBusy>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'fading'>('idle');
   const [isCommitting, setIsCommitting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -103,7 +109,7 @@ export default function App() {
   const hasOutput = Boolean(analysisPreview || review);
   const isReviewReadOnly = session?.status === 'finalizing';
   const canCommit = Boolean(
-    session && validatedResult && destination && ['review', 'needs_attention', 'completed'].includes(session.status),
+    session && validatedResult && session.destination_path && ['review', 'needs_attention', 'completed'].includes(session.status),
   );
 
   const applySession = (
@@ -129,7 +135,9 @@ export default function App() {
         path: next.destination_path,
         name: fileName(next.destination_path),
       }));
+      window.localStorage.setItem(LAST_DESTINATION_PATH_KEY, next.destination_path);
     } else {
+      // A loaded Session with no destination must not inherit the global default.
       setDestination(null);
     }
     if (!preserveIntakeDraft) {
@@ -208,7 +216,7 @@ export default function App() {
     setPickerBusy('source');
     setErrorNotice(null);
     try {
-      const selected = await pickSource(source?.path);
+      const selected = await pickSource(source?.path || window.localStorage.getItem(LAST_SOURCE_PATH_KEY) || undefined);
       await applySourceSelection(selected);
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The source picker failed.'));
@@ -218,6 +226,7 @@ export default function App() {
   };
 
   const applySourceSelection = async (selected: Awaited<ReturnType<typeof pickSource>>) => {
+      window.localStorage.setItem(LAST_SOURCE_PATH_KEY, selected.path);
       if (selected.media_kind === null) {
         applySession(await openCompletedSession(selected.selection_id));
         return true;
@@ -258,8 +267,61 @@ export default function App() {
     }
   };
 
+  const copySettingsFromSelection = async (selected: Awaited<ReturnType<typeof pickSource>>) => {
+    const loaded = selected.media_kind === null
+      ? await openCompletedSession(selected.selection_id)
+      : await openSourceSession(selected.selection_id);
+    if (!loaded) throw new Error('No completed Session was found for that source.');
+    const intake = intakeFromSession(loaded.extra_instructions || '', loaded.speaker_hints);
+    setContext(intake.context);
+    setSpeakers(intake.speakers);
+    setExtractionOptions(loaded.extraction_options);
+    setModel(loaded.model);
+    setEffort(loaded.effort);
+    const copiedAttachments = await Promise.all((loaded.attachment_paths || []).map(async (path) => {
+      try {
+        const issued = await resolveAttachmentPath(path);
+        return { selectionId: issued.selection_id, path: issued.path, name: issued.name };
+      } catch {
+        // Preserve an unavailable path so the user can repair it before execution.
+        return { path, name: fileName(path) };
+      }
+    }));
+    setAttachments(copiedAttachments);
+  };
+
+  const selectCopySettings = async () => {
+    setPickerBusy('copy-settings');
+    setErrorNotice(null);
+    try {
+      const initialPath = destination?.path || window.localStorage.getItem(LAST_DESTINATION_PATH_KEY) || undefined;
+      await copySettingsFromSelection(await pickSource(initialPath));
+      return true;
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The source session could not be loaded.'));
+      return false;
+    } finally {
+      setPickerBusy(null);
+    }
+  };
+
+  const selectCopySettingsPath = async (path: string) => {
+    setPickerBusy('copy-settings');
+    setErrorNotice(null);
+    try {
+      await copySettingsFromSelection(await resolveSourcePath(path));
+      return true;
+    } catch (error) {
+      setErrorNotice(errorMessage(error, 'The source session could not be loaded.'));
+      return false;
+    } finally {
+      setPickerBusy(null);
+    }
+  };
+
   const applyDestinationSelection = async (selected: Awaited<ReturnType<typeof pickDestination>>, preserveSession: boolean) => {
     const selectedDestination = { selectionId: selected.selection_id, path: selected.path, name: selected.name };
+    window.localStorage.setItem(LAST_DESTINATION_PATH_KEY, selected.path);
     if (preserveSession && session) {
       const updated = await updateSessionDestination(session.id, selected.selection_id);
       setSession((current) => current ? { ...current, destination_path: updated.destination_path } : updated);
@@ -278,7 +340,7 @@ export default function App() {
     setPickerBusy('destination');
     setErrorNotice(null);
     try {
-      const selected = await pickDestination(destination?.path);
+      const selected = await pickDestination(destination?.path || window.localStorage.getItem(LAST_DESTINATION_PATH_KEY) || undefined);
       await applyDestinationSelection(selected, preserveSession);
     } catch (error) {
       setErrorNotice(errorMessage(error, 'The destination picker failed.'));
@@ -359,9 +421,24 @@ export default function App() {
     try {
       const speakerHints = speakers.split(',').map((speaker) => speaker.trim()).filter(Boolean);
       const attachmentSelectionIds = attachments.map((attachment) => attachment.selectionId).filter((id): id is string => Boolean(id));
-      const active = session || await createSession({
+      const createCurrentSession = async () => {
+        // Restored paths have no durable picker ID; issue a fresh capability before POSTing.
+        const rememberedPath = window.localStorage.getItem(LAST_DESTINATION_PATH_KEY);
+        let currentDestination = destination || (rememberedPath
+          ? { path: rememberedPath, name: fileName(rememberedPath) }
+          : null);
+        if (currentDestination && !currentDestination.selectionId) {
+          const refreshed = await resolveDestinationPath(currentDestination.path);
+          currentDestination = {
+            selectionId: refreshed.selection_id,
+            path: refreshed.path,
+            name: refreshed.name,
+          };
+          setDestination(currentDestination);
+        }
+        return createSession({
           sourceSelectionId: source.selectionId!,
-          destinationSelectionId: destination?.selectionId,
+          destinationSelectionId: currentDestination?.selectionId,
           extraInstructions: context,
           speakerHints,
           extractionOptions,
@@ -369,7 +446,78 @@ export default function App() {
           effort,
           attachmentSelectionIds,
         });
-      if (!session) applySession(active);
+      };
+      let active = session;
+      let refreshedSource: SelectedSource | undefined;
+      if (!active) {
+        try {
+          active = await createCurrentSession();
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'Picker selection is invalid or expired') throw error;
+
+          // Re-issue capabilities after a service restart while retaining the user's chosen paths.
+          const refreshedSourceSelection = await resolveSourcePath(source.path);
+          const destinationPath = destination?.path || window.localStorage.getItem(LAST_DESTINATION_PATH_KEY);
+          const refreshedDestination = destinationPath
+            ? await resolveDestinationPath(destinationPath)
+            : undefined;
+          const attachmentsToRefresh = attachments.filter((attachment) => Boolean(attachment.selectionId));
+          const refreshedAttachments = await Promise.all(
+            attachmentsToRefresh.map(async (attachment) => {
+              const refreshed = await resolveAttachmentPath(attachment.path);
+              return {
+                previousSelectionId: attachment.selectionId!,
+                selectionId: refreshed.selection_id,
+                path: refreshed.path,
+                name: refreshed.name,
+              };
+            }),
+          );
+          refreshedSource = {
+            selectionId: refreshedSourceSelection.selection_id,
+            path: refreshedSourceSelection.path,
+            name: refreshedSourceSelection.name,
+            mediaKind: refreshedSourceSelection.media_kind!,
+            sizeBytes: refreshedSourceSelection.size_bytes,
+            durationSeconds: refreshedSourceSelection.duration_seconds,
+            sourceDate: refreshedSourceSelection.source_date,
+          };
+          setSource(refreshedSource);
+          if (refreshedDestination) {
+            setDestination({
+              selectionId: refreshedDestination.selection_id,
+              path: refreshedDestination.path,
+              name: refreshedDestination.name,
+            });
+          }
+          const refreshedAttachmentById = new Map(
+            refreshedAttachments.map((attachment) => [
+              attachment.previousSelectionId,
+              {
+                selectionId: attachment.selectionId,
+                path: attachment.path,
+                name: attachment.name,
+              },
+            ]),
+          );
+          setAttachments((current) => current.map((attachment) => (
+            attachment.selectionId
+              ? refreshedAttachmentById.get(attachment.selectionId) || attachment
+              : attachment
+          )));
+          active = await createSession({
+            sourceSelectionId: refreshedSourceSelection.selection_id,
+            destinationSelectionId: refreshedDestination?.selection_id,
+            extraInstructions: context,
+            speakerHints,
+            extractionOptions,
+            model,
+            effort,
+            attachmentSelectionIds: refreshedAttachments.map((attachment) => attachment.selectionId),
+          });
+        }
+      }
+      if (!session) applySession(active, refreshedSource);
       const controller = new AbortController();
       executeAbortRef.current = controller;
       await executeSession(active.id, handleEvent, {
@@ -519,6 +667,8 @@ export default function App() {
             onSelectSourcePath={selectSourcePath}
             onClearSource={clearSource}
             pickerBusy={pickerBusy}
+            onSelectCopySettings={() => void selectCopySettings()}
+            onSelectCopySettingsPath={selectCopySettingsPath}
             context={context}
             setContext={setContext}
             onEditSystemPrompt={() => void openSystemPrompt()}

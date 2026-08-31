@@ -177,7 +177,8 @@ def _render_transcript(plan: AnalysisPlan, words: list[WordTiming], tokens: list
         text = _word_text(tokens[start : turn.source_word_end + 1])
         if text:
             lines.append(f"[{_clock(words[start].start)}] {speaker}: {text}")
-    return "\n".join(lines)
+    # Keep each turn and silence marker as its own Markdown paragraph.
+    return "\n\n".join(lines)
 
 
 def render_analysis_plan(

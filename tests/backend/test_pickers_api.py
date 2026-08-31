@@ -110,11 +110,14 @@ def test_pasted_source_and_destination_paths_issue_picker_capabilities(tmp_path:
     source.write_bytes(b"video")
     destination = tmp_path / "records"
     destination.mkdir()
+    completed_folder = tmp_path / "completed-session"
+    completed_folder.mkdir()
 
     with TestClient(create_app(Settings(data_dir=tmp_path / "data"))) as client:
         selected_source = client.post("/api/pickers/source-path", json={"path": str(source)})
         quoted_source = client.post("/api/pickers/source-path", json={"path": f"'{source}'"})
         selected_destination = client.post("/api/pickers/destination-path", json={"path": str(destination)})
+        selected_folder = client.post("/api/pickers/source-path", json={"path": str(completed_folder)})
         relative_source = client.post("/api/pickers/source-path", json={"path": "capture.mp4"})
 
     assert selected_source.status_code == 200
@@ -124,8 +127,27 @@ def test_pasted_source_and_destination_paths_issue_picker_capabilities(tmp_path:
     assert quoted_source.json()["path"] == str(source.resolve())
     assert selected_destination.status_code == 200
     assert selected_destination.json()["path"] == str(destination.resolve())
+    assert selected_folder.status_code == 200
+    assert selected_folder.json()["media_kind"] is None
+    assert selected_folder.json()["path"] == str(completed_folder.resolve())
     assert relative_source.status_code == 422
     assert relative_source.json()["detail"] == "Pasted path must be absolute"
+
+
+def test_pasted_attachment_path_issues_an_attachment_capability(tmp_path: Path) -> None:
+    attachment = tmp_path / "context.md"
+    attachment.write_text("Use the preferred product names.")
+
+    with TestClient(create_app(Settings(data_dir=tmp_path / "data"))) as client:
+        selected = client.post("/api/pickers/attachment-path", json={"path": str(attachment)})
+
+    assert selected.status_code == 200
+    payload = selected.json()
+    assert len(payload.pop("selection_id")) >= 32
+    assert payload == {
+        "path": str(attachment.resolve()),
+        "name": "context.md",
+    }
 
 
 def test_session_can_be_created_before_an_output_folder_is_selected(tmp_path: Path) -> None:

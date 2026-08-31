@@ -63,6 +63,9 @@ def test_completed_session_manifest_survives_folder_move_and_fresh_database(tmp_
     assert not Path(manifest["session"]["source_path"]).is_absolute()
     assert manifest["assets"]["source_media"]["path"] == manifest["session"]["source_path"]
 
+    # Reopening a completed record must not require retaining the original recording.
+    (completed_folder / manifest["assets"]["source_media"]["path"]).unlink()
+
     moved_destination = tmp_path / "moved-destination"
     moved_destination.mkdir()
     moved_folder = moved_destination / completed_folder.name

@@ -262,7 +262,7 @@ export default function DistillationPanel({
       // Headers
       if (trimmed.startsWith('# ')) {
         return (
-          <h1 key={idx} className="text-xl font-sans font-bold text-main-canvas tracking-tight mt-6 mb-4">
+          <h1 key={idx} className="text-base leading-tight font-sans font-semibold text-main-canvas tracking-tight mt-4 mb-2">
             {trimmed.substring(2)}
           </h1>
         );
@@ -270,14 +270,14 @@ export default function DistillationPanel({
       if (trimmed.startsWith('## ')) {
         inTranscript = trimmed === '## Transcript';
         return (
-          <h2 key={idx} className="text-sm font-sans font-bold tracking-wider text-muted-canvas uppercase mt-5 mb-2.5 border-b border-muted-canvas pb-1.5">
+          <h2 key={idx} className="text-[11px] font-sans font-bold tracking-wider text-muted-canvas uppercase mt-3 mb-1.5 border-b border-muted-canvas pb-1">
             {trimmed.substring(3)}
           </h2>
         );
       }
       if (trimmed.startsWith('### ')) {
         return (
-          <h3 key={idx} className="text-xs font-sans font-semibold tracking-wide text-main-canvas uppercase mt-4 mb-2">
+          <h3 key={idx} className="text-[10px] font-sans font-semibold tracking-wide text-main-canvas uppercase mt-2.5 mb-1">
             {trimmed.substring(4)}
           </h3>
         );
@@ -389,15 +389,6 @@ export default function DistillationPanel({
               >
                 RAW
               </button>
-            </div>
-
-            {/* Live Streaming Indicator */}
-            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-input-canvas border border-muted-canvas text-xs font-mono text-muted-canvas">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-main-canvas opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-main-canvas"></span>
-              </span>
-              <span>{isProcessing ? `DISTILLING • ${processTime}` : 'DISTILLED'}</span>
             </div>
 
             {/* Action Tools */}
@@ -538,13 +529,6 @@ export default function DistillationPanel({
             <p className="font-sans text-sm text-muted-canvas max-w-md leading-relaxed mb-6">
               Consolidate spoken dialogs and media frames into structured layouts. Select a source to begin; sample sessions will become interactive as their workflow is implemented.
             </p>
-
-            <button
-              onClick={onSelectSource}
-              className="px-5 py-2 rounded border border-muted-canvas hover:border-active-canvas bg-input-canvas hover:bg-input-canvas/80 text-main-canvas font-sans font-semibold text-xs tracking-wider uppercase transition-all duration-200 mb-8 cursor-pointer"
-            >
-              Select File Source
-            </button>
 
             {/* Quick pre-sets launcher. Visible for design continuity; disabled until backed by real sessions. */}
             <div className="w-full max-w-md border-t border-muted-canvas pt-6 mt-2">

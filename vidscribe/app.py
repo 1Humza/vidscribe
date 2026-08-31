@@ -297,7 +297,30 @@ def create_app(
 
     @app.post("/api/pickers/source-path", response_model=PickerSelection)
     def choose_source_path(request: PathSelectionRequest) -> PickerSelection:
-        return source_file_selection(pasted_path(request.path))
+        selected = pasted_path(request.path)
+        if selected.is_dir():
+            return PickerSelection(
+                selection_id=selections.issue("source", selected),
+                path=str(selected),
+                name=selected.name,
+                media_kind=None,
+            )
+        return source_file_selection(selected)
+
+    @app.post(
+        "/api/pickers/attachment-path",
+        response_model=PickerSelection,
+        response_model_exclude_none=True,
+    )
+    def choose_attachment_path(request: PathSelectionRequest) -> PickerSelection:
+        selected = pasted_path(request.path)
+        if not selected.is_file():
+            raise HTTPException(status_code=422, detail="Attached Context must be an existing file")
+        return PickerSelection(
+            selection_id=selections.issue("attachment", selected),
+            path=str(selected),
+            name=selected.name,
+        )
 
     @app.post("/api/sessions/open-completed", response_model=SessionView)
     def open_completed_session(request: OpenCompletedSessionRequest) -> SessionView:

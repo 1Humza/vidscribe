@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { commitSession, createSession, executeSession, getSystemPrompt, openCompletedSession, openSourceSession, pickCompletedSessionFolder, updateSystemPrompt } from './api';
+import { commitSession, createSession, executeSession, getSystemPrompt, openCompletedSession, openSourceSession, pickCompletedSessionFolder, selectAttachmentPath, updateSystemPrompt } from './api';
 
 function streamResponse(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -107,6 +107,19 @@ describe('commitSession', () => {
 });
 
 describe('openCompletedSession', () => {
+  it('reissues an attachment capability from its retained path', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await selectAttachmentPath('/recordings/context.md');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/pickers/attachment-path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/recordings/context.md' }),
+    });
+  });
+
   it('opens the native completed-session folder picker', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
       status: 200,

@@ -13,7 +13,6 @@ import {
   ChevronRight,
   File,
   Folder,
-  FolderOpen,
   Image,
   Info,
   Lightbulb,
@@ -21,8 +20,10 @@ import {
   Star,
   X,
 } from 'lucide-react';
-import type { DistillationResult, FileTreeNode, SelectedDestination } from '../types';
+import type { DistillationResult, FileTreeNode, PickerBusy, SelectedDestination } from '../types';
 import GlassModal from './GlassModal';
+import PathPickerControl from './PathPickerControl';
+import { displayPath } from '../pathDisplay';
 
 interface InsightsPanelProps {
   result: DistillationResult | null;
@@ -40,7 +41,7 @@ interface InsightsPanelProps {
   destination?: SelectedDestination | null;
   onSelectDestination?: () => void;
   onSelectDestinationPath?: (path: string) => Promise<boolean>;
-  pickerBusy?: 'source' | 'destination' | null;
+  pickerBusy?: PickerBusy;
   isCommitPending: boolean;
   isReadOnly: boolean;
 }
@@ -123,14 +124,6 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
     onMentionSelect(null);
   };
 
-  const finishDestinationPath = async (event: FormEvent) => {
-    event.preventDefault();
-    const path = destinationPath.trim();
-    if (!path || !await onSelectDestinationPath(path)) return;
-    setDestinationPath('');
-    setShowDestinationPath(false);
-  };
-
   const openSnapshot = (filename: string) => {
     setHoveredSnapshot(null);
     setActiveSnapshotFilename(filename);
@@ -163,6 +156,9 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
 
   const showMentionHover = (mentionId: string, element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
+    const mention = result?.mentions.find((item) => item.id === mentionId);
+    const sourceRange = mention?.sourceRanges[0];
+    if (mention) onMentionSelect(mention.tag, sourceRange?.sourceWordStart);
     setHoveredMention(mentionId);
     setHoveredMentionPosition({ left: rect.left, top: Math.max(8, rect.top - 6) });
   };
@@ -170,6 +166,7 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
   const clearMentionHover = () => {
     setHoveredMention(null);
     setHoveredMentionPosition(null);
+    onMentionSelect(null);
   };
 
   useEffect(() => {
@@ -345,59 +342,44 @@ export default function InsightsPanel({ result, onSaveIdentity, onSaveSessionDat
                 <div className="text-[10px] font-bold text-muted-canvas uppercase tracking-wider">
                   Filesystem Preview
                 </div>
-                <button
-                  type="button"
-                  aria-label="Select Destination"
-                  onClick={onSelectDestination}
-                  disabled={pickerBusy !== null || isReadOnly}
-                  title={pickerBusy === 'destination' ? 'Opening output picker…' : 'Choose output folder in Finder'}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-muted-canvas text-orange-600 transition-colors hover:border-orange-500 hover:bg-orange-500/10 dark:text-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <FolderOpen size={13} />
-                </button>
-              </div>
-              {showDestinationPath || !destination ? (
-                <form onSubmit={finishDestinationPath} className="mb-2 flex items-center gap-1.5 rounded-lg bg-input-canvas border border-orange-500/40 p-1.5">
-                  <input
-                    autoFocus
-                    required
-                    aria-label="Output path"
-                    value={destinationPath}
-                    onChange={(event) => setDestinationPath(event.target.value)}
-                    placeholder="/path/to/output-folder"
-                    spellCheck={false}
-                    className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-xs font-mono text-main-canvas placeholder-muted-canvas/60 focus:outline-none"
-                  />
-                  <button type="submit" aria-label="Use output path" disabled={pickerBusy !== null || isReadOnly} className="rounded-lg bg-orange-500 p-1.5 text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">
-                    <Check size={13} />
-                  </button>
+                {destination && !showDestinationPath && (
                   <button
                     type="button"
-                    aria-label="Cancel output path"
+                    aria-label="Edit output path"
                     onClick={() => {
-                      setShowDestinationPath(false);
-                      setDestinationPath('');
+                      setDestinationPath(destination.path);
+                      setShowDestinationPath(true);
                     }}
-                    className="rounded-lg border border-muted-canvas p-1.5 text-muted-canvas hover:text-rose-500"
+                    disabled={isReadOnly}
+                    title={destination.path}
+                    className="min-w-0 max-w-[65%] truncate text-right text-[10px] font-mono text-muted-canvas/80 hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <X size={13} />
+                    {displayPath(destination.path)}
                   </button>
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  aria-label="Edit output path"
-                  onClick={() => {
-                    setDestinationPath(destination.path);
-                    setShowDestinationPath(true);
+                )}
+              </div>
+              {showDestinationPath || !destination ? (
+                <PathPickerControl
+                  value={destinationPath}
+                  onChange={setDestinationPath}
+                  onSubmit={onSelectDestinationPath}
+                  onPick={onSelectDestination}
+                  inputLabel="Output path"
+                  submitLabel="Use output path"
+                  pickerLabel="Select output path"
+                  placeholder="/path/to/output-folder"
+                  autoFocus
+                  showSubmit={false}
+                  showCancel={false}
+                  closeOnBlur
+                  disabled={pickerBusy !== null || isReadOnly}
+                  onCancel={() => {
+                    setShowDestinationPath(false);
+                    setDestinationPath('');
                   }}
-                  disabled={isReadOnly}
-                  title="Click to edit the output folder path"
-                  className="mb-2 block w-full truncate rounded-lg border border-transparent px-2 py-1 text-left text-[10px] font-mono text-muted-canvas/70 underline decoration-dotted underline-offset-2 hover:border-muted-canvas hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {destination.path}
-                </button>
-              )}
+                  className="mb-2 rounded-lg bg-input-canvas border-orange-500/40"
+                />
+              ) : null}
               <div className="border border-muted-canvas p-2 rounded bg-input-canvas/50 min-h-9 max-h-[160px] overflow-y-auto">
                 {result.filesystem.length > 0 ? (
                   renderFileSystemTree(result.filesystem)

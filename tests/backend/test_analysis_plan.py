@@ -115,7 +115,7 @@ def test_server_renders_ten_second_silence_markers_on_single_lines() -> None:
         source_media_has_video=False,
     )
 
-    assert "## Transcript\n\n[00:00] Ada: Before\n(Silence 00:10)\n[00:10] Ada: After" in result.session_record_markdown
+    assert "## Transcript\n\n[00:00] Ada: Before\n\n(Silence 00:10)\n\n[00:10] Ada: After" in result.session_record_markdown
 
 
 def test_plan_rejects_out_of_range_or_incomplete_transcript_references() -> None:

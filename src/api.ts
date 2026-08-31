@@ -60,6 +60,10 @@ export function selectSourcePath(path: string): Promise<SourcePickerSelectionDto
   return postJson('/api/pickers/source-path', { path });
 }
 
+export function selectAttachmentPath(path: string): Promise<AttachmentPickerSelectionDto> {
+  return postJson('/api/pickers/attachment-path', { path });
+}
+
 export function pickCompletedSessionFolder(): Promise<SourcePickerSelectionDto> {
   return postJson('/api/pickers/completed-session', {});
 }
