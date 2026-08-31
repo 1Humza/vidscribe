@@ -147,6 +147,10 @@ describe('issue 2 session UI', () => {
 
     render(<App />);
     await user.click(screen.getByRole('button', { name: 'Copy settings' }));
+    expect(screen.getByRole('textbox', { name: 'Copy settings path' })).toBeInTheDocument();
+    await user.click(screen.getByRole('heading', { name: 'Context' }));
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Copy settings path' })).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Copy settings' }));
     await user.click(screen.getByRole('button', { name: 'Select copy settings path' }));
 
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Context' })).toHaveValue('Use the launch brief.'));

@@ -1,5 +1,5 @@
 import { FolderOpen, X } from 'lucide-react';
-import { useRef, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 
 interface PathPickerControlProps {
   value: string;
@@ -43,6 +43,15 @@ export default function PathPickerControl({
 }: PathPickerControlProps) {
   const controlRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (!closeOnBlur || !onCancel) return undefined;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!controlRef.current?.contains(event.target as Node)) onCancel();
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [closeOnBlur, onCancel]);
+
   const submit = async () => {
     const path = value.trim();
     if (!path || !await onSubmit(path)) return;
@@ -65,7 +74,11 @@ export default function PathPickerControl({
     <div
       ref={controlRef}
       onBlur={(event) => {
-        if (closeOnBlur && onCancel && !event.currentTarget.contains(event.relatedTarget as Node | null)) onCancel();
+        if (closeOnBlur && onCancel && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          window.setTimeout(() => {
+            if (!controlRef.current?.contains(document.activeElement)) onCancel();
+          }, 0);
+        }
       }}
       className={`flex items-center gap-1.5 rounded-xl border p-1.5 ${className}`}
     >
@@ -88,11 +101,11 @@ export default function PathPickerControl({
           </button>
         )}
       </form>
-      <button type="button" aria-label={pickerLabel} onClick={() => void onPick()} disabled={disabled} className="rounded-lg border border-muted-canvas p-1.5 text-muted-canvas hover:text-main-canvas disabled:cursor-not-allowed disabled:opacity-50" title={pickerLabel}>
+      <button type="button" aria-label={pickerLabel} onClick={() => void onPick()} disabled={disabled} className="rounded-lg p-1.5 text-muted-canvas hover:bg-input-canvas hover:text-main-canvas disabled:cursor-not-allowed disabled:opacity-50" title={pickerLabel}>
         <FolderOpen size={13} />
       </button>
       {showCancel && onCancel && (
-        <button type="button" aria-label={cancelLabel} onClick={onCancel} disabled={disabled} className="rounded-lg border border-muted-canvas p-1.5 text-muted-canvas hover:text-rose-500 disabled:opacity-50">
+        <button type="button" aria-label={cancelLabel} onClick={onCancel} disabled={disabled} className="rounded-lg p-1.5 text-rose-500 hover:bg-rose-500/10 disabled:opacity-50">
           <X size={13} />
         </button>
       )}

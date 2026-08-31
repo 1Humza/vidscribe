@@ -61,7 +61,7 @@ const extractionTiles: Array<{ key: keyof ExtractionOptionsDto; label: string }>
 ];
 
 function formatFileSize(bytes: number | null | undefined): string {
-  if (bytes == null) return 'size unavailable';
+  if (bytes == null) return 'SIZE';
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
   let value = bytes;
@@ -76,7 +76,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 }
 
 function formatDuration(seconds: number | null | undefined): string {
-  if (seconds == null) return 'duration unavailable';
+  if (seconds == null) return 'DURATION';
   const totalSeconds = Math.max(0, Math.round(seconds));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -87,7 +87,7 @@ function formatDuration(seconds: number | null | undefined): string {
 }
 
 function formatSourceDate(sourceDate: string | null | undefined): string {
-  return sourceDate || 'date unavailable';
+  return sourceDate || 'DATE';
 }
 
 export default function IntakePanel(props: IntakePanelProps) {
@@ -157,24 +157,22 @@ export default function IntakePanel(props: IntakePanelProps) {
             </div>
 
             {props.source ? (
-              <div className="overflow-hidden rounded-xl border border-muted-canvas bg-input-canvas transition-all">
-                <div className="px-3 py-2">
-                  <div className="flex items-center space-x-3 overflow-hidden">
-                    <div className="flex-shrink-0 rounded-lg border border-muted-canvas bg-panel-canvas p-2 text-orange-500">
+              <div className="overflow-hidden rounded-2xl border border-muted-canvas bg-input-canvas px-3 pb-2 pt-3 transition-all">
+                <div className="flex items-start gap-3 overflow-hidden">
+                    <div className="flex-shrink-0 rounded-xl border border-muted-canvas bg-panel-canvas p-2.5 text-orange-500">
                       {props.source.mediaKind === 'video' ? <FileVideo size={20} /> : <FileAudio size={20} />}
                     </div>
-                    <div className="overflow-hidden">
-                      <div className="max-w-[280px] truncate font-mono text-sm font-bold text-main-canvas sm:max-w-md" title={props.source.name}>
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <div className="truncate font-mono text-sm font-bold text-main-canvas" title={props.source.name}>
                         {props.source.name}
                       </div>
-                      <div className="mt-0.5 max-w-[260px] truncate font-mono text-[10px] uppercase text-muted-canvas">
+                      <div className="mt-1 truncate font-mono text-[11px] uppercase tracking-wide text-muted-canvas">
                         {props.source.mediaKind} • {formatFileSize(props.source.sizeBytes)} • {formatDuration(props.source.durationSeconds)} • {formatSourceDate(props.source.sourceDate)}
                       </div>
                     </div>
-                  </div>
                 </div>
                 {showSourcePath ? (
-                  <div className="p-1">
+                  <div className="mt-2">
                     <PathPickerControl
                       value={sourcePath}
                       onChange={setSourcePath}
@@ -193,18 +191,18 @@ export default function IntakePanel(props: IntakePanelProps) {
                         setShowSourcePath(false);
                         setSourcePath('');
                       }}
-                      className="border-0 bg-transparent p-0"
+                      className="bg-panel-canvas/45 p-1.5"
                     />
                   </div>
                 ) : (
-                  <div className="flex w-full items-center gap-1 px-1 py-0.5">
+                  <div className="mt-2 flex min-h-9 w-full items-center gap-2 rounded-lg bg-panel-canvas/45 px-2 py-1.5">
                     <button
                       type="button"
                       aria-label="Edit source path"
                       onClick={openSourcePathEditor}
                       disabled={props.isProcessing}
                       title={props.source.path}
-                      className="min-w-0 flex-1 truncate rounded-lg px-2 py-1 text-left font-mono text-[10px] text-muted-canvas/80 hover:bg-panel-canvas hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-w-0 flex-1 truncate rounded-md px-1 py-1 text-left font-mono text-[11px] text-muted-canvas/85 hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {displayPath(props.source.path)}
                     </button>
@@ -213,7 +211,7 @@ export default function IntakePanel(props: IntakePanelProps) {
                       aria-label="Select Source"
                       onClick={props.onSelectSource}
                       disabled={props.pickerBusy !== null || props.isProcessing}
-                      className="inline-flex shrink-0 items-center justify-center rounded-lg border border-muted-canvas p-1 text-muted-canvas hover:text-main-canvas disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-canvas hover:bg-input-canvas hover:text-main-canvas disabled:cursor-not-allowed disabled:opacity-50"
                       title="Choose a different source file or folder"
                     >
                       <FolderOpen size={13} />
@@ -223,7 +221,7 @@ export default function IntakePanel(props: IntakePanelProps) {
                       aria-label="Remove Source"
                       onClick={props.onClearSource}
                       disabled={props.isProcessing}
-                      className="inline-flex shrink-0 items-center justify-center rounded-lg border border-muted-canvas p-1 text-muted-canvas hover:border-rose-500/40 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-rose-500 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                       title="Remove source"
                     >
                       <X size={13} />
@@ -258,7 +256,7 @@ export default function IntakePanel(props: IntakePanelProps) {
               <h2 className="font-semibold text-sm text-muted-canvas uppercase tracking-wider">
                 Context
               </h2>
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 items-center gap-5">
                 <button
                   type="button"
                   aria-label="Copy settings"
