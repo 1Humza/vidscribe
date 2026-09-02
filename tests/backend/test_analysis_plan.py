@@ -68,6 +68,8 @@ def test_server_renders_transcript_and_chapters_from_canonical_word_times() -> N
     assert "00:20 Close" in record
     assert "[00:00] Ada: First corrected phrase. Middle. Close. Done." in record
     assert "[00:09] Ada: Corrected terminology — \"corrected phrase.\"" in record
+    assert record.count("📝 **Timing plan** · 08-12-2026") == 1
+    assert record.index("📝 **Timing plan** · 08-12-2026") > record.index("## Action Summary")
     assert "15:47" not in record
     assert result.mentions[0].replacement == "corrected phrase."
 
@@ -115,7 +117,7 @@ def test_server_renders_ten_second_silence_markers_on_single_lines() -> None:
         source_media_has_video=False,
     )
 
-    assert "## Transcript\n\n[00:00] Ada: Before\n\n(Silence 00:10)\n\n[00:10] Ada: After" in result.session_record_markdown
+    assert "## Transcript\n\n[00:00] Ada: Before\n(Silence 00:10)\n[00:10] Ada: After" in result.session_record_markdown
 
 
 def test_plan_rejects_out_of_range_or_incomplete_transcript_references() -> None:

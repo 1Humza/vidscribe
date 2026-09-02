@@ -177,8 +177,8 @@ def _render_transcript(plan: AnalysisPlan, words: list[WordTiming], tokens: list
         text = _word_text(tokens[start : turn.source_word_end + 1])
         if text:
             lines.append(f"[{_clock(words[start].start)}] {speaker}: {text}")
-    # Keep each turn and silence marker as its own Markdown paragraph.
-    return "\n\n".join(lines)
+    # Keep turns and silence markers on adjacent Markdown lines for a compact transcript.
+    return "\n".join(lines)
 
 
 def render_analysis_plan(
@@ -193,7 +193,7 @@ def render_analysis_plan(
     _validate_plan(plan, words, options)
     tokens = _corrected_tokens(words, plan)
     header = f"📝 **{plan.short_name.strip()}** · {plan.session_date}"
-    parts = [header, "## Recall Brief", _normalize_provider_text(plan.recall_brief).strip()]
+    parts = ["## Recall Brief", _normalize_provider_text(plan.recall_brief).strip()]
     if options.highlights:
         highlight_lines = [
             f"- [{_clock(words[item.source_word_start].start)}] "
@@ -267,8 +267,6 @@ def normalize_session_record_headings(markdown: str) -> str:
 def validate_session_record(markdown: str, options: ExtractionOptions) -> None:
     """Enforce the stable, user-visible Session Record contract at the provider boundary."""
     header = re.search(r"^📝 \*\*.+\*\* · \d{2}-\d{2}-\d{4}", markdown, re.MULTILINE)
-    if header is None or (header.start() and not markdown.startswith("## Input Context\n")):
-        raise ValueError("Session Record must begin with the canonical header")
     required = ["Recall Brief", "Snapshots", "Transcript"]
     selected = [
         *( ["Highlights"] if options.highlights else [] ),
@@ -284,12 +282,16 @@ def validate_session_record(markdown: str, options: ExtractionOptions) -> None:
         heading.strip().strip("*").strip()
         for heading in re.findall(r"^#{2,6}\s+(.+)$", markdown, re.MULTILINE)
     ]
-    for heading in [*required, *selected]:
+    for heading in required:
         if heading not in headings:
             raise ValueError(f"Session Record is missing {heading}")
+    # Optional sections may be intentionally removed during manual review.
+    selected_present = [heading for heading in selected if heading in headings]
     if any(heading in headings for heading in omitted):
         raise ValueError("Session Record includes an unselected extraction")
-    if options.action_summary:
+    if options.action_summary and "Action Summary" in headings:
+        if header is None:
+            raise ValueError("Session Record must include the canonical header")
         action_summary_match = re.search(
             r"^#{2,6}\s+Action Summary\s*$([\s\S]*?)(?=^#{2,6}\s+|\Z)",
             markdown,
@@ -299,11 +301,11 @@ def validate_session_record(markdown: str, options: ExtractionOptions) -> None:
         word_count = len(re.findall(r"[^\W_]+(?:['’][^\W_]+)?", action_summary_match.group(1)))
         if word_count > _ACTION_SUMMARY_WORD_LIMIT:
             raise ValueError("Action Summary must not exceed 350 words")
-    expected = ["Recall Brief", *selected, "Snapshots", "Transcript"]
+    expected = ["Recall Brief", *selected_present, "Snapshots", "Transcript"]
     positions = [headings.index(heading) for heading in expected]
     if positions != sorted(positions) or headings[-1] != "Transcript":
         raise ValueError("Session Record sections are out of order")
-    if options.chapters:
+    if options.chapters and "Chapters" in headings:
         chapter_match = re.search(
             r"^#{2,6}\s+Chapters\s*$([\s\S]*?)(?=^#{2,6}\s+Snapshots\s*$)",
             markdown,

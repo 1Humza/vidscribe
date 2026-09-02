@@ -189,13 +189,15 @@ class SessionRepository:
         payload["attachment_paths"] = json.loads(payload["attachment_paths"])
         payload["transcript_word_timings"] = json.loads(payload["transcript_word_timings"])
         payload["attempts"] = [
-            {
-                **dict(attempt),
-                "result": json.loads(attempt["result"]) if attempt["result"] else None,
-            }
+            self._attempt_payload(attempt)
             for attempt in attempts
         ]
         return SessionView.model_validate(payload)
+
+    @staticmethod
+    def _attempt_payload(attempt: sqlite3.Row) -> dict[str, object]:
+        result = json.loads(attempt["result"]) if attempt["result"] else None
+        return {**dict(attempt), "result": result}
 
     def get_by_completed_folder(self, folder_path: Path) -> SessionView:
         folder_path = folder_path.resolve()

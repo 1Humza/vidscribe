@@ -103,10 +103,10 @@ def _with_input_context(
     consulted_names = [name for name in consulted if name in allowed]
     lines = ["## Input Context", ""]
     if extra_instructions:
-        lines.extend(["### Extra Instructions", "", extra_instructions, ""])
+        lines.extend([extra_instructions, ""])
     if consulted_names:
         lines.extend(["### Attached Context", "", *[f"- {name}" for name in consulted_names], ""])
-    return "\n".join(lines) + markdown
+    return "\n".join(lines) + "\n" + markdown
 
 
 class SessionPipeline:

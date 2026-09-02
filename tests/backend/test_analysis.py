@@ -12,9 +12,12 @@ from vidscribe.analysis import (
     parse_provider_analysis_result,
 )
 from vidscribe.models import AnalysisResult, ExtractionOptions
-from vidscribe.pipeline import _read_naming_precedents
+from vidscribe.pipeline import _read_naming_precedents, _with_input_context
 from vidscribe.prompts import default_system_prompt
-from vidscribe.session_record import normalize_session_record_headings, validate_session_record
+from vidscribe.session_record import (
+    normalize_session_record_headings,
+    validate_session_record,
+)
 
 
 class FakeFiles:
@@ -309,6 +312,29 @@ Source Media was audio.
     validate_session_record(markdown, ExtractionOptions())
 
 
+def test_session_record_allows_optional_sections_to_be_removed_during_review() -> None:
+    markdown = """📝 **Demo Sync** · 07-31-2026
+
+## Recall Brief
+
+Grounded recall.
+
+## Action Summary
+
+Grounded summary.
+
+## Snapshots
+
+Source Media was audio.
+
+## Transcript
+
+[00:00] Speaker 1: Hello
+"""
+
+    validate_session_record(markdown, ExtractionOptions(highlights=True))
+
+
 def test_session_record_rejects_an_action_summary_over_350_words() -> None:
     markdown = """📝 **Demo Sync** · 07-31-2026
 
@@ -378,3 +404,12 @@ def test_session_record_normalization_keeps_adjacent_headings_separate() -> None
     normalized = normalize_session_record_headings(markdown)
 
     assert normalized == "## Action Summary\n\n## Recall Brief\n"
+
+
+def test_input_context_merges_extra_instructions_without_legacy_section() -> None:
+    markdown = "## Recall Brief\n\nGrounded recall."
+
+    rendered = _with_input_context(markdown, "Keep the product names.", [], [])
+
+    assert rendered == "## Input Context\n\nKeep the product names.\n\n## Recall Brief\n\nGrounded recall."
+    assert "### Extra Instructions" not in rendered

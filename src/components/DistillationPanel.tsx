@@ -211,6 +211,67 @@ export default function DistillationPanel({
     ));
   };
 
+  const renderInlineMarkdown = (
+    value: string,
+    shouldHighlight: boolean,
+    lineIndex: number,
+    targetLineIndex: number,
+    keyPrefix: string,
+  ): React.ReactNode[] => {
+    const nodes: React.ReactNode[] = [];
+    let plainStart = 0;
+
+    const addPlain = (end: number) => {
+      if (end <= plainStart) return;
+      nodes.push(
+        <React.Fragment key={`${keyPrefix}-plain-${plainStart}`}>
+          {highlightText(value.slice(plainStart, end), shouldHighlight, lineIndex, targetLineIndex)}
+        </React.Fragment>,
+      );
+    };
+
+    for (let index = 0; index < value.length;) {
+      // Markdown backslash escapes should display the punctuation without the slash.
+      if (value[index] === '\\' && '*_`[]()'.includes(value[index + 1] || '')) {
+        addPlain(index);
+        nodes.push(<React.Fragment key={`${keyPrefix}-escape-${index}`}>{value[index + 1]}</React.Fragment>);
+        index += 2;
+        plainStart = index;
+        continue;
+      }
+
+      const marker = value.startsWith('**', index) || value.startsWith('__', index)
+        ? value.slice(index, index + 2)
+        : value[index] === '*' || value[index] === '_'
+          ? value[index]
+          : '';
+      if (!marker || (marker.length === 1 && value[index + 1] === marker)) {
+        index += 1;
+        continue;
+      }
+
+      const close = value.indexOf(marker, index + marker.length);
+      if (close <= index + marker.length || value.slice(index + marker.length, close).trim() === '') {
+        index += marker.length;
+        continue;
+      }
+
+      addPlain(index);
+      const inner = value.slice(index + marker.length, close);
+      const renderedInner = renderInlineMarkdown(inner, shouldHighlight, lineIndex, targetLineIndex, `${keyPrefix}-${index}`);
+      nodes.push(
+        marker.length === 2
+          ? <strong key={`${keyPrefix}-strong-${index}`}>{renderedInner}</strong>
+          : <em key={`${keyPrefix}-em-${index}`}>{renderedInner}</em>,
+      );
+      index = close + marker.length;
+      plainStart = index;
+    }
+
+    addPlain(value.length);
+    return nodes;
+  };
+
   // Renders markdown content to HTML with quiet room styles and interactive checkboxes
   const renderRichMarkdown = (md: string) => {
     if (!md) return null;
@@ -249,7 +310,7 @@ export default function DistillationPanel({
         quoteLines = [];
         return (
           <blockquote key={`q-${idx}`} className="border-l-2 border-muted-canvas pl-4 py-1.5 my-4 bg-input-canvas/40 italic text-muted-canvas font-sans text-sm leading-relaxed">
-            {quoteContent}
+            {renderInlineMarkdown(quoteContent, false, idx, targetLine, `quote-${idx}`)}
           </blockquote>
         );
       }
@@ -263,7 +324,7 @@ export default function DistillationPanel({
       if (trimmed.startsWith('# ')) {
         return (
           <h1 key={idx} className="text-base leading-tight font-sans font-semibold text-main-canvas tracking-tight mt-4 mb-2">
-            {trimmed.substring(2)}
+            {renderInlineMarkdown(trimmed.substring(2), false, idx, targetLine, `h1-${idx}`)}
           </h1>
         );
       }
@@ -271,14 +332,14 @@ export default function DistillationPanel({
         inTranscript = trimmed === '## Transcript';
         return (
           <h2 key={idx} className="text-[11px] font-sans font-bold tracking-wider text-muted-canvas uppercase mt-3 mb-1.5 border-b border-muted-canvas pb-1">
-            {trimmed.substring(3)}
+            {renderInlineMarkdown(trimmed.substring(3), false, idx, targetLine, `h2-${idx}`)}
           </h2>
         );
       }
       if (trimmed.startsWith('### ')) {
         return (
           <h3 key={idx} className="text-[10px] font-sans font-semibold tracking-wide text-main-canvas uppercase mt-2.5 mb-1">
-            {trimmed.substring(4)}
+            {renderInlineMarkdown(trimmed.substring(4), false, idx, targetLine, `h3-${idx}`)}
           </h3>
         );
       }
@@ -287,18 +348,6 @@ export default function DistillationPanel({
       if (trimmed.startsWith('- [ ]') || trimmed.startsWith('- [x]') || trimmed.startsWith('- [ ]') || trimmed.startsWith('- [X]')) {
         const isChecked = trimmed.toLowerCase().startsWith('- [x]');
         const text = trimmed.substring(5).trim();
-
-        // Parse bold and metadata in checklist items
-        const parts = text.split('**');
-        let renderedText: React.ReactNode = text;
-        if (parts.length >= 3) {
-          renderedText = (
-            <span>
-              <strong>{parts[1]}</strong>
-              {parts.slice(2).join('')}
-            </span>
-          );
-        }
 
         return (
           <div key={idx} className="flex items-start space-x-3 my-2.5 pl-0.5 group cursor-default select-none" title="Checklist editing is pending durable review edits">
@@ -312,7 +361,7 @@ export default function DistillationPanel({
             <span className={`text-sm font-sans leading-relaxed transition-all ${
               isChecked ? 'text-muted-canvas line-through' : 'text-main-canvas'
             }`}>
-              {highlightText(typeof renderedText === 'string' ? renderedText : text, inTranscript, idx, targetLine)}
+              {renderInlineMarkdown(text, inTranscript, idx, targetLine, `check-${idx}`)}
             </span>
           </div>
         );
@@ -324,7 +373,7 @@ export default function DistillationPanel({
         return (
           <li key={idx} className="list-none flex items-start space-x-2 my-2 text-sm text-muted-canvas pl-0.5">
             <span className="mt-2 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-muted-canvas" />
-            <span>{highlightText(text, inTranscript, idx, targetLine)}</span>
+            <span>{renderInlineMarkdown(text, inTranscript, idx, targetLine, `list-${idx}`)}</span>
           </li>
         );
       }
@@ -337,14 +386,14 @@ export default function DistillationPanel({
           return (
             <div key={idx} className="flex items-start space-x-2.5 my-2.5 text-sm text-muted-canvas font-sans pl-0.5">
               <span className="font-mono text-main-canvas text-xs font-semibold">{matchNumber[1]}.</span>
-              <span>{highlightText(matchNumber[2], inTranscript, idx, targetLine)}</span>
+              <span>{renderInlineMarkdown(matchNumber[2], inTranscript, idx, targetLine, `number-${idx}`)}</span>
             </div>
           );
         }
 
         return (
           <p key={idx} className={`text-sm text-muted-canvas font-sans ${inTranscript ? 'my-0.5 leading-5' : 'leading-relaxed my-2.5'}`}>
-            {highlightText(trimmed, inTranscript, idx, targetLine)}
+            {renderInlineMarkdown(trimmed, inTranscript, idx, targetLine, `paragraph-${idx}`)}
           </p>
         );
       }
